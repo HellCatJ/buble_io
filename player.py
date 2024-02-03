@@ -6,6 +6,7 @@ import pygame
 RUNNING = True
 WIDTH_WINDOW, HEIGHT_WINDOW = 700, 600
 PLAYER_RADIUS = 50
+PLAYER_COLOR = (255, 0, 0)
 original_direction_vector = direction_vector = (0, 0)
 
 
@@ -51,7 +52,7 @@ while RUNNING:
     # Рисуем новое состояние игрового поля
     screen.fill('gray')  # Заливка фона окна
     pygame.draw.circle(screen,
-                       (255, 0, 0),
+                       PLAYER_COLOR,
                        (WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2),
                        PLAYER_RADIUS)
     pygame.display.update()  # Обновление дисплея
