@@ -2,7 +2,6 @@ import pygame
 import socket
 import random as rnd
 
-
 RUNNING = True
 FPS = 100
 START_PLAYER_SIZE = 50
@@ -22,25 +21,38 @@ def get_coord(line: str):
     return ''
 
 
-
 class Player:
     def __init__(self, conn, addr, x, y, r, color):
         self.connection = conn
         self.address = addr
+
         self.x = x
         self.y = y
         self.radius = r
         self.color = color
+
+        self.width_vision = 1000
+        self.height_vision = 1000
+
         self.errors = 0
-        self.speed_x = 5
-        self.speed_y = 2
+
+        self.absolute_speed = 1
+        self.speed_x = self.speed_y = 0
 
     def update(self):
         self.x += self.speed_x
         self.y += self.speed_y
 
     def change_speed(self, data):
-        pass
+        """Функция нормирования вектора направления движения
+        (отбросить длину вектора и оставить только его направление) """
+        if data == (0, 0):
+            self.x, self.y = data
+        else:
+            len_vector = (data[0] ** 2 + data[1] ** 2) ** 0.5
+            data = data[0] / len_vector, data[1] / len_vector
+            data = tuple(map(lambda x: x * self.absolute_speed, data))
+            self.speed_x, self.speed_y = data
 
 
 # Создание основного (буферного) сокета
@@ -49,18 +61,15 @@ main_socket = socket.socket(socket.AF_INET,
 main_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Запрет упаковки нескольких состояний в один пакет
 main_socket.bind(('localhost', 10000))  # Установка адреса и порта для сокета
 main_socket.setblocking(False)  # Отключение блокировки выполнение программы на время ожидания ответа
-                                # (работа независио от клиента)
+# (работа независио от клиента)
 main_socket.listen(5)  # Режим прослушивания с макс. 5 одноврем. подключениями к буферному сокету
-
 
 # Создание графического окна сервера
 pygame.init()
 screen = pygame.display.set_mode((WIDTH_SERVER_WINDOW, HEIGHT_SERVER_WINDOW))
 clock = pygame.time.Clock()
 
-
 players = []
-
 
 while RUNNING:
     clock.tick(FPS)  # Установка кадров
@@ -82,26 +91,64 @@ while RUNNING:
     except BlockingIOError:
         print('No palyers')
 
-
     # Считываем команды игроков
     for player in players:
         try:
             data = player.connection.recv(1024)  # Чтение данных с сокета
-            data.decode()
-            data = get_coord(data)
+            data = get_coord(data.decode())
+
+            # Обрабатываем команды
             player.change_speed(data)
         except:
             pass
-
         player.update()
 
-    # Обрабатываем команды
+    # Определяем что видит каждый игрок
+    players_count = len(players)
+    visible_obj = [[] for i in range(players_count)]
+    for i in range(players_count):
+        for j in range(i + 1, players_count):
+            distance_x = players[j].x - players[i].x
+            distance_y = players[j].y - players[i].y
 
+            # игрок i видит игрока j
+            if (
+                    (abs(distance_x) <= players[i].width_vision // 2 + players[j].radius)
+                    and
+                    (abs(distance_y) <= players[i].height_vision // 2 + players[j].radius)
+            ):
+                # подготовка данных для добавления в список видимости
+                x_ = round(distance_x)
+                y_ = round(distance_y)
+                r_ = round(players[j].radius)
+                c_ = players[j].color
+
+                visible_obj[i].append('{} {} {} {}'.format(x_, y_, r_, c_))
+
+            # игрок j видит игрока i
+            if (
+                    (abs(distance_x) <= players[j].width_vision // 2 + players[i].radius)
+                    and
+                    (abs(distance_y) <= players[j].height_vision // 2 + players[i].radius)
+            ):
+                # подготовка данных для добавления в список видимости
+                x_ = round(-distance_x)
+                y_ = round(-distance_y)
+                r_ = round(players[i].radius)
+                c_ = players[i].color
+
+                visible_obj[j].append('{} {} {} {}'.format(x_, y_, r_, c_))
+
+
+    # Формируем ответ каждому игроку
+    responses = ['' for i in range(len(players))]
+    for i in range(len(players)):
+        responses[i] = f'<{",".join(visible_obj[i])}>'
 
     # Отправляем новое состояние поля
-    for player in players:
+    for i, player in enumerate(players):
         try:
-            player.connection.send('New state of game'.encode())  # Отправляем данные
+            player.connection.send(responses[i].encode())  # Отправляем данные
             player.errors = 0
         except:
             player.errors += 1
@@ -127,7 +174,6 @@ while RUNNING:
 
         pygame.draw.circle(screen, color, (x, y), radius)
         pygame.display.update()
-
 
 pygame.quit()
 main_socket.close()
