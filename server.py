@@ -1,12 +1,15 @@
-import pygame
-import socket
 import random as rnd
+import socket
+
+import pygame
 
 RUNNING = True
 FPS = 100
 START_PLAYER_SIZE = 50
 WIDTH_ROOM, HEIGHT_ROOM = 4000, 4000
 WIDTH_SERVER_WINDOW, HEIGHT_SERVER_WINDOW = 300, 300
+
+NPS_QUANTITY = 25
 COLORS = {0: (255, 255, 0), 1: (255, 0, 0), 2: (0, 255, 0), 3: (0, 255, 255)}
 
 
@@ -40,8 +43,27 @@ class Player:
         self.speed_x = self.speed_y = 0
 
     def update(self):
-        self.x += self.speed_x
-        self.y += self.speed_y
+        # х координата
+        if self.x - self.radius <= 0:
+            if self.speed_x >= 0:
+                self.x += self.speed_x
+        else:
+            if self.x + self.radius >= WIDTH_ROOM:
+                if self.speed_x <= 0:
+                    self.x += self.speed_x
+            else:
+                self.x += self.speed_x
+
+        # y координата
+        if self.y - self.radius <= 0:
+            if self.speed_y >= 0:
+                self.y += self.speed_y
+        else:
+            if self.y + self.radius >= HEIGHT_ROOM:
+                if self.speed_y <= 0:
+                    self.x += self.speed_y
+            else:
+                self.y += self.speed_y
 
     def change_speed(self, data):
         """Функция нормирования вектора направления движения
@@ -49,7 +71,8 @@ class Player:
         if data == (0, 0):
             self.x, self.y = data
         else:
-            len_vector = (data[0] ** 2 + data[1] ** 2) ** 0.5
+            len_vector = (data[0] ** 2 + data[1] ** 2) ** 0.5 or 0.1
+
             data = data[0] / len_vector, data[1] / len_vector
             data = tuple(map(lambda x: x * self.absolute_speed, data))
             self.speed_x, self.speed_y = data
@@ -69,38 +92,57 @@ pygame.init()
 screen = pygame.display.set_mode((WIDTH_SERVER_WINDOW, HEIGHT_SERVER_WINDOW))
 clock = pygame.time.Clock()
 
-players = []
+# Создание стартового набора НПС
+players = [Player(None, None,
+                  x=rnd.randrange(WIDTH_ROOM),
+                  y=rnd.randrange(HEIGHT_ROOM),
+                  r=rnd.randint(10, 100),
+                  color=rnd.randrange(4)
+                  )
+           for _ in range(NPS_QUANTITY)
+           ]
+
+tick = 0
 
 while RUNNING:
+    tick += 1
     clock.tick(FPS)  # Установка кадров
 
-    # Проверяем, есть ли желающие войти в игру
-    try:
-        new_socket, address = main_socket.accept()  # Проверка на наличие подключений
-        new_socket.setblocking(False)
-        new_player = Player(
-            new_socket,
-            address,
-            rnd.randint(0, WIDTH_ROOM),
-            rnd.randint(0, HEIGHT_ROOM),
-            START_PLAYER_SIZE,
-            rnd.randrange(4)
-        )
-        players.append(new_player)
-        print('Connected ', address)
-    except BlockingIOError:
-        print('No palyers')
+    if tick == 200:
+        tick = 0
+        # Проверяем, есть ли желающие войти в игру
+        try:
+            new_socket, address = main_socket.accept()  # Проверка на наличие подключений
+            new_socket.setblocking(False)
+            new_player = Player(
+                new_socket,
+                address,
+                rnd.randrange(WIDTH_ROOM),
+                rnd.randrange(HEIGHT_ROOM),
+                START_PLAYER_SIZE,
+                color=rnd.randrange(4)
+            )
+            new_player.connection.send(str(new_player.color).encode())
+            players.append(new_player)
+            print('Connected ', address)
+        except BlockingIOError:
+            pass
 
     # Считываем команды игроков
     for player in players:
-        try:
-            data = player.connection.recv(1024)  # Чтение данных с сокета
-            data = get_coord(data.decode())
+        if player.connection is not None:
+            try:
+                data = player.connection.recv(1024)  # Чтение данных с сокета
+                data = get_coord(data.decode())
 
-            # Обрабатываем команды
-            player.change_speed(data)
-        except:
-            pass
+                # Обрабатываем команды
+                player.change_speed(data)
+            except (BlockingIOError, ConnectionResetError):
+                pass
+        else:
+            if tick == 100:
+                data = (rnd.randint(-100, 100), rnd.randint(-100, 100))
+                player.change_speed(data)
         player.update()
 
     # Определяем что видит каждый игрок
@@ -117,13 +159,21 @@ while RUNNING:
                     and
                     (abs(distance_y) <= players[i].height_vision // 2 + players[j].radius)
             ):
-                # подготовка данных для добавления в список видимости
-                x_ = round(distance_x)
-                y_ = round(distance_y)
-                r_ = round(players[j].radius)
-                c_ = players[j].color
+                # Проверка сможет ли i съесть j
+                if ((distance_x ** 2 + distance_y ** 2) ** 0.5 <= players[i].radius and
+                        players[i].radius > 1.1 * players[j].radius
+                ):
+                    #### Изменение радиуса i игрока
+                    players[j].radius, players[j].speed_x, players[j].speed_y = 0, 0, 0
 
-                visible_obj[i].append('{} {} {} {}'.format(x_, y_, r_, c_))
+                if players[i].connection is not None:
+                    # подготовка данных для добавления в список видимости
+                    x_ = round(distance_x)
+                    y_ = round(distance_y)
+                    r_ = round(players[j].radius)
+                    c_ = players[j].color
+
+                    visible_obj[i].append('{} {} {} {}'.format(x_, y_, r_, c_))
 
             # игрок j видит игрока i
             if (
@@ -131,14 +181,21 @@ while RUNNING:
                     and
                     (abs(distance_y) <= players[j].height_vision // 2 + players[i].radius)
             ):
-                # подготовка данных для добавления в список видимости
-                x_ = round(-distance_x)
-                y_ = round(-distance_y)
-                r_ = round(players[i].radius)
-                c_ = players[i].color
+                # Проверка сможет ли j съесть i
+                if ((distance_x ** 2 + distance_y ** 2) ** 0.5 <= players[j].radius and
+                        players[j].radius > 1.1 * players[i].radius
+                ):
+                    #### Изменение радиуса j игрока
+                    players[i].radius, players[i].speed_x, players[i].speed_y = 0, 0, 0
 
-                visible_obj[j].append('{} {} {} {}'.format(x_, y_, r_, c_))
+                if players[j].connection is not None:
+                    # подготовка данных для добавления в список видимости
+                    x_ = round(-distance_x)
+                    y_ = round(-distance_y)
+                    r_ = round(players[i].radius)
+                    c_ = players[i].color
 
+                    visible_obj[j].append('{} {} {} {}'.format(x_, y_, r_, c_))
 
     # Формируем ответ каждому игроку
     responses = ['' for i in range(len(players))]
@@ -147,16 +204,18 @@ while RUNNING:
 
     # Отправляем новое состояние поля
     for i, player in enumerate(players):
-        try:
-            player.connection.send(responses[i].encode())  # Отправляем данные
-            player.errors = 0
-        except:
-            player.errors += 1
+        if players[i].connection is not None:
+            try:
+                player.connection.send(responses[i].encode())  # Отправляем данные
+                player.errors = 0
+            except:
+                player.errors += 1
 
     # Очистка списка от игроков с ошибками
     for player in players:
-        if player.errors == 500:
-            player.connection.close()
+        if player.errors == 500 or player.radius == 0:
+            if player.connection is not None:
+                player.connection.close()
             players.remove(player)
 
     # Рисуем комнату

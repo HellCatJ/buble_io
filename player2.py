@@ -6,9 +6,10 @@ WIDTH_WINDOW, HEIGHT_WINDOW = 700, 600
 PLAYER_RADIUS = 50
 PLAYER_COLOR = (255, 0, 0)
 original_direction_vector = direction_vector = (0, 0)
+COLORS = {0: (255, 255, 0), 1: (255, 0, 0), 2: (0, 255, 0), 3: (0, 255, 255)}
 
 
-def find(line):
+def find_data(line):
     open_index = None
     for i, elem in enumerate(line):
         if elem == '<':
@@ -18,11 +19,25 @@ def find(line):
     return ''
 
 
+def draw_opponents(data):
+    for i, obj in enumerate(data):
+        new_obj = obj.split()
+        x = WIDTH_WINDOW // 2 + int(new_obj[0])
+        y = HEIGHT_WINDOW // 2 + int(new_obj[1])
+        r = int(new_obj[2])
+        color = int(new_obj[3])
+        pygame.draw.circle(screen, COLORS[color], (x, y), r)
+
+
+
 # Создание сокета и подключение к серверу
 player_sock = socket.socket(socket.AF_INET,
                             socket.SOCK_STREAM)  # Настройка сокета AF_INET - IPv4, SOCK_STREAM - TCP protocol
 player_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Запрет упаковки нескольких состояний в один пакет
 player_sock.connect(('localhost', 10000))  # Подключение к серверу
+
+PLAYER_COLOR = COLORS[int(player_sock.recv(16).decode())]
+
 
 # Создание окна игры
 pygame.init()
@@ -51,8 +66,9 @@ while RUNNING:
 
     # Получаем от сервера новое состояние игрового пля
     data = player_sock.recv(1024)  # Ожидание ответа от сервера
-    data = find(data.decode())
-    print('GOT ', data)
+    data = find_data(data.decode())
+    data = data.split(',')
+
 
     # Рисуем новое состояние игрового поля
     screen.fill('gray')  # Заливка фона окна
@@ -60,6 +76,8 @@ while RUNNING:
                        PLAYER_COLOR,
                        (WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2),
                        PLAYER_RADIUS)
+    if data != ['']:
+        draw_opponents(data)
     pygame.display.update()  # Обновление дисплея
 
 pygame.quit()
