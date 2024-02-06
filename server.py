@@ -13,6 +13,7 @@ WIDTH_SERVER_WINDOW, HEIGHT_SERVER_WINDOW = 300, 300
 NPS_QUANTITY = 25
 FOOD_QUANTITY = (WIDTH_ROOM * HEIGHT_ROOM) // 80000
 COLORS = {0: (255, 255, 0), 1: (255, 0, 0), 2: (0, 255, 0), 3: (0, 255, 255)}
+COLORS_SET = len(COLORS)
 
 
 def get_new_radius(player_radius, food_radius):
@@ -47,14 +48,28 @@ class Player:
         self.y = y
         self.radius = radius
         self.color = color
+        self.name = '^_^'
 
+        self.scale = 1
+        self.width_window = 1000
+        self.height_window = 800
         self.width_vision = 1000
         self.height_vision = 1000
 
         self.errors = 0
+        self.ready = False  # True - отправка клиенту состояния поля
 
         self.absolute_speed = 30 / self.radius ** 0.5
         self.speed_x = self.speed_y = 0
+
+    def set_options(self, data: str):
+        data = iter(data[1:-1].split(' '))
+        self.name = next(data)
+        self.width_window = int(next(data))
+        self.height_window = int(next(data))
+        self.width_vision = self.width_window
+        self.height_vision = self.height_window
+
 
     def update(self):
         # х координата
@@ -79,7 +94,28 @@ class Player:
             else:
                 self.y += self.speed_y
 
+        # Зависимость абсолютной скорости от размера игрока
         self.absolute_speed = 30 / self.radius ** 0.5
+
+        # Уменьшение радиуса игрока
+        if self.radius > 100:
+            self.radius -= self.radius / 1800
+
+        # Изменение масштаба от размера игрока
+        if (self.radius >= self.width_vision / 4 or
+                self.radius >= self.height_vision / 4):
+            if (self.width_vision <= WIDTH_ROOM or
+                    self.height_vision <= HEIGHT_ROOM):
+                self.scale *= 2
+                self.width_vision = self.width_vision * self.scale
+                self.height_vision = self.height_vision * self.scale
+
+        if (self.radius < self.width_vision / 8 and
+                self.radius < self.height_vision / 8):
+            if self.scale > 1:
+                self.scale //= 2
+                self.width_vision = self.width_window * self.scale
+                self.height_vision = self.height_window * self.scale
 
     def change_speed(self, data):
         """Функция нормирования вектора направления движения
@@ -113,19 +149,15 @@ players = [Player(None, None,
                   x=rnd.randrange(WIDTH_ROOM),
                   y=rnd.randrange(HEIGHT_ROOM),
                   radius=rnd.randint(10, 100),
-                  color=rnd.randrange(4)
-                  )
-           for _ in range(NPS_QUANTITY)
-           ]
+                  color=rnd.randrange(COLORS_SET))
+           for _ in range(NPS_QUANTITY)]
 
 # Создание стартового набора еды
 food = [Food(x=rnd.randrange(WIDTH_ROOM),
              y=rnd.randrange(HEIGHT_ROOM),
              radius=FOOD_SIZE,
-             color=rnd.randrange(4)
-             )
-        for _ in range(FOOD_QUANTITY)
-        ]
+             color=rnd.randrange(COLORS_SET))
+        for _ in range(FOOD_QUANTITY)]
 
 tick = 0
 
@@ -139,30 +171,61 @@ while RUNNING:
         try:
             new_socket, address = main_socket.accept()  # Проверка на наличие подключений
             new_socket.setblocking(False)
+            spawn = rnd.choice(food)  # Выбираем место спавна на месте еды
             new_player = Player(
                 new_socket,
                 address,
-                rnd.randrange(WIDTH_ROOM),
-                rnd.randrange(HEIGHT_ROOM),
+                spawn.x,
+                spawn.y,
                 START_PLAYER_SIZE,
                 color=rnd.randrange(4)
             )
-            message = f'{new_player.color} {new_player.radius}'
-            new_player.connection.send(message.encode())
+
+            food.remove(spawn)
             players.append(new_player)
+
             print('Connected ', address)
         except BlockingIOError:
             pass
+
+        # Дополняется список NPC
+        for i in range(NPS_QUANTITY - len(players)):
+            if len(food):
+                spawn = rnd.choice(food)
+                players.append(Player(None, None,
+                                      x=spawn.x,
+                                      y=spawn.y,
+                                      radius=rnd.randint(10, 100),
+                                      color=rnd.randrange(COLORS_SET)
+                                      )
+                               )
+                food.remove(spawn)
+
+    # Дополняется список еды
+    food += [Food(x=rnd.randrange(WIDTH_ROOM),
+                  y=rnd.randrange(HEIGHT_ROOM),
+                  radius=FOOD_SIZE,
+                  color=rnd.randrange(COLORS_SET))
+             for _ in range(FOOD_QUANTITY - len(food))]
 
     # Считываем команды игроков
     for player in players:
         if player.connection is not None:
             try:
-                data = player.connection.recv(1024)  # Чтение данных с сокета
-                data = get_coord(data.decode())
-
-                # Обрабатываем команды
-                player.change_speed(data)
+                data = player.connection.recv(1024).decode()  # Чтение данных с сокета
+                # Пришло сообщение о готовности к диалогу
+                if data[0] == '!':
+                    player.ready = True
+                # Пришло имя и размер окна игрока
+                elif (data[0] + data[-1]) == '..':
+                    player.set_options(data)
+                    message = f'{START_PLAYER_SIZE} {player.color}'
+                    player.connection.send(message.encode())
+                # Пришел курсор
+                else:
+                    data = get_coord(data)
+                    # Обрабатываем команды
+                    player.change_speed(data)
             except (BlockingIOError, ConnectionResetError):
                 pass
         else:
@@ -195,15 +258,12 @@ while RUNNING:
 
                 if players[i].connection is not None and food[k].radius != 0:
                     # подготовка данных для добавления в список видимости
-                    x_ = round(distance_x)
-                    y_ = round(distance_y)
-                    r_ = round(food[k].radius)
+                    x_ = round(distance_x / players[i].scale)
+                    y_ = round(distance_y / players[i].scale)
+                    r_ = round(food[k].radius / players[i].scale)
                     c_ = food[k].color
 
                     visible_obj[i].append(f'{x_} {y_} {r_} {c_}')
-
-
-
 
         for j in range(i + 1, players_count):
             distance_x = players[j].x - players[i].x
@@ -225,9 +285,9 @@ while RUNNING:
 
                 if players[i].connection is not None:
                     # подготовка данных для добавления в список видимости
-                    x_ = round(distance_x)
-                    y_ = round(distance_y)
-                    r_ = round(players[j].radius)
+                    x_ = round(distance_x / players[i].scale)
+                    y_ = round(distance_y / players[i].scale)
+                    r_ = round(players[j].radius / players[j].scale)
                     c_ = players[j].color
 
                     visible_obj[i].append(f'{x_} {y_} {r_} {c_}')
@@ -248,9 +308,9 @@ while RUNNING:
 
                 if players[j].connection is not None:
                     # подготовка данных для добавления в список видимости
-                    x_ = round(-distance_x)
-                    y_ = round(-distance_y)
-                    r_ = round(players[i].radius)
+                    x_ = round(-distance_x / players[j].scale)
+                    y_ = round(-distance_y / players[j].scale)
+                    r_ = round(players[i].radius / players[j].scale)
                     c_ = players[i].color
 
                     visible_obj[j].append(f'{x_} {y_} {r_} {c_}')
@@ -258,12 +318,12 @@ while RUNNING:
     # Формируем ответ каждому игроку
     responses = ['' for i in range(len(players))]
     for i in range(len(players)):
-        player_radius = [str(round(players[i].radius))]
+        player_radius = [str(round(players[i].radius / players[i].scale))]
         responses[i] = f'<{",".join(player_radius + visible_obj[i])}>'
 
     # Отправляем новое состояние поля
     for i, player in enumerate(players):
-        if players[i].connection is not None:
+        if players[i].connection is not None and player.ready:
             try:
                 player.connection.send(responses[i].encode())  # Отправляем данные
                 player.errors = 0

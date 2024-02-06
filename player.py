@@ -10,6 +10,8 @@ PLAYER_RADIUS = 50
 # PLAYER_COLOR = (255, 0, 0)
 original_direction_vector = direction_vector = (0, 0)
 COLORS = {0: (255, 255, 0), 1: (255, 0, 0), 2: (0, 255, 0), 3: (0, 255, 255)}
+COLORS_SET = len(COLORS)
+NICKNAME = '|>_<|'
 
 
 def find_data(line):
@@ -33,8 +35,8 @@ def draw_opponents(data):
 
 
 class Me:
-    def __init__(self, data):
-        self.color, self.radius = map(int, data.split())
+    def __init__(self, data: str):
+        self.radius, self.color = map(int, data.split())
 
     def update(self, new_r):
         self.radius = new_r
@@ -56,8 +58,16 @@ player_sock = socket.socket(socket.AF_INET,
 player_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Запрет упаковки нескольких состояний в один пакет
 player_sock.connect(('localhost', 10000))  # Подключение к серверу
 
-# Получение стартовых данных с сервера
+# Отправка серверу ник и размер окна
+player_sock.send(f'.{NICKNAME} {WIDTH_WINDOW} {HEIGHT_WINDOW}.'.encode())
+
+# Получение размера и цвета
 data = player_sock.recv(64).decode()
+
+# Отправка подтверждения получения
+player_sock.send('!'.encode())
+
+# Объекта игрока
 me = Me(data)
 
 # Создание окна игры
@@ -96,7 +106,8 @@ while RUNNING:
     if data != ['']:
         me.update(int(data[0]))
         draw_opponents(data[1:])
-        me.draw()
+
+    me.draw()
 
 
     pygame.display.update()  # Обновление дисплея
