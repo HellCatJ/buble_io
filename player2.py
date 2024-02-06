@@ -1,10 +1,13 @@
 import socket
+
 import pygame
 
 RUNNING = True
 WIDTH_WINDOW, HEIGHT_WINDOW = 700, 600
+HALF_WIDTH, HALF_HEIGHT = WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2
+SCREEN_CENTER = (WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2)
 PLAYER_RADIUS = 50
-PLAYER_COLOR = (255, 0, 0)
+# PLAYER_COLOR = (255, 0, 0)
 original_direction_vector = direction_vector = (0, 0)
 COLORS = {0: (255, 255, 0), 1: (255, 0, 0), 2: (0, 255, 0), 3: (0, 255, 255)}
 
@@ -22,12 +25,29 @@ def find_data(line):
 def draw_opponents(data):
     for i, obj in enumerate(data):
         new_obj = obj.split()
-        x = WIDTH_WINDOW // 2 + int(new_obj[0])
-        y = HEIGHT_WINDOW // 2 + int(new_obj[1])
+        x = HALF_WIDTH + int(new_obj[0])
+        y = HALF_HEIGHT + int(new_obj[1])
         r = int(new_obj[2])
         color = int(new_obj[3])
         pygame.draw.circle(screen, COLORS[color], (x, y), r)
 
+
+class Me:
+    def __init__(self, data: str):
+        self.color, self.radius = map(int, data.split())
+
+    def update(self, new_r):
+        self.radius = new_r
+
+    def draw(self):
+        if not self.radius:
+            return
+        pygame.draw.circle(
+            screen,
+            COLORS[self.color],
+            SCREEN_CENTER,
+            self.radius
+        )
 
 
 # Создание сокета и подключение к серверу
@@ -36,8 +56,9 @@ player_sock = socket.socket(socket.AF_INET,
 player_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Запрет упаковки нескольких состояний в один пакет
 player_sock.connect(('localhost', 10000))  # Подключение к серверу
 
-PLAYER_COLOR = COLORS[int(player_sock.recv(16).decode())]
-
+# Получение стартовых данных с сервера
+data: str = player_sock.recv(64).decode()
+me = Me(data)
 
 # Создание окна игры
 pygame.init()
@@ -53,9 +74,9 @@ while RUNNING:
     # Считывание мыши
     if pygame.mouse.get_focused():  # Находится ли мышь в пределах игрового окна
         pos = pygame.mouse.get_pos()  # Считывание координат мыши
-        direction_vector = pos[0] - WIDTH_WINDOW // 2, pos[1] - HEIGHT_WINDOW // 2  # Вычисление вектора движения
+        direction_vector = pos[0] - HALF_WIDTH, pos[1] - HALF_HEIGHT  # Вычисление вектора движения
 
-        if direction_vector[0] ** 2 + direction_vector[1] ** 2 <= PLAYER_RADIUS ** 2:
+        if direction_vector[0] ** 2 + direction_vector[1] ** 2 <= me.radius ** 2:
             direction_vector = (0, 0)
 
     # Отправка вектора движения на сервер если он поменялся
@@ -65,19 +86,19 @@ while RUNNING:
         player_sock.send(message_for_server.encode())
 
     # Получаем от сервера новое состояние игрового пля
-    data = player_sock.recv(1024)  # Ожидание ответа от сервера
-    data = find_data(data.decode())
+    new_data = player_sock.recv(1024)  # Ожидание ответа от сервера
+    data = find_data(new_data.decode())
     data = data.split(',')
-
 
     # Рисуем новое состояние игрового поля
     screen.fill('gray')  # Заливка фона окна
-    pygame.draw.circle(screen,
-                       PLAYER_COLOR,
-                       (WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2),
-                       PLAYER_RADIUS)
+
     if data != ['']:
-        draw_opponents(data)
+        me.update(int(data[0]))
+        draw_opponents(data[1:])
+        me.draw()
+
+
     pygame.display.update()  # Обновление дисплея
 
 pygame.quit()

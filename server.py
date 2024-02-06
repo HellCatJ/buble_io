@@ -6,11 +6,17 @@ import pygame
 RUNNING = True
 FPS = 100
 START_PLAYER_SIZE = 50
+FOOD_SIZE = 15
 WIDTH_ROOM, HEIGHT_ROOM = 4000, 4000
 WIDTH_SERVER_WINDOW, HEIGHT_SERVER_WINDOW = 300, 300
 
 NPS_QUANTITY = 25
+FOOD_QUANTITY = (WIDTH_ROOM * HEIGHT_ROOM) // 80000
 COLORS = {0: (255, 255, 0), 1: (255, 0, 0), 2: (0, 255, 0), 3: (0, 255, 255)}
+
+
+def get_new_radius(player_radius, food_radius):
+    return (player_radius ** 2 + food_radius ** 2) ** 0.5
 
 
 def get_coord(line: str):
@@ -24,14 +30,22 @@ def get_coord(line: str):
     return ''
 
 
+class Food:
+    def __init__(self, x, y, radius, color):
+        self.x = x
+        self.y = y
+        self.radius = radius
+        self.color = color
+
+
 class Player:
-    def __init__(self, conn, addr, x, y, r, color):
+    def __init__(self, conn, addr, x, y, radius, color):
         self.connection = conn
         self.address = addr
 
         self.x = x
         self.y = y
-        self.radius = r
+        self.radius = radius
         self.color = color
 
         self.width_vision = 1000
@@ -39,7 +53,7 @@ class Player:
 
         self.errors = 0
 
-        self.absolute_speed = 1
+        self.absolute_speed = 30 / self.radius ** 0.5
         self.speed_x = self.speed_y = 0
 
     def update(self):
@@ -64,6 +78,8 @@ class Player:
                     self.x += self.speed_y
             else:
                 self.y += self.speed_y
+
+        self.absolute_speed = 30 / self.radius ** 0.5
 
     def change_speed(self, data):
         """Функция нормирования вектора направления движения
@@ -96,11 +112,20 @@ clock = pygame.time.Clock()
 players = [Player(None, None,
                   x=rnd.randrange(WIDTH_ROOM),
                   y=rnd.randrange(HEIGHT_ROOM),
-                  r=rnd.randint(10, 100),
+                  radius=rnd.randint(10, 100),
                   color=rnd.randrange(4)
                   )
            for _ in range(NPS_QUANTITY)
            ]
+
+# Создание стартового набора еды
+food = [Food(x=rnd.randrange(WIDTH_ROOM),
+             y=rnd.randrange(HEIGHT_ROOM),
+             radius=FOOD_SIZE,
+             color=rnd.randrange(4)
+             )
+        for _ in range(FOOD_QUANTITY)
+        ]
 
 tick = 0
 
@@ -122,7 +147,8 @@ while RUNNING:
                 START_PLAYER_SIZE,
                 color=rnd.randrange(4)
             )
-            new_player.connection.send(str(new_player.color).encode())
+            message = f'{new_player.color} {new_player.radius}'
+            new_player.connection.send(message.encode())
             players.append(new_player)
             print('Connected ', address)
         except BlockingIOError:
@@ -149,6 +175,36 @@ while RUNNING:
     players_count = len(players)
     visible_obj = [[] for i in range(players_count)]
     for i in range(players_count):
+        # Какую еду видит игрок i
+        for k in range(len(food)):
+            distance_x = food[k].x - players[i].x
+            distance_y = food[k].y - players[i].y
+
+            # игрок i видит еду k
+            if (
+                    (abs(distance_x) <= players[i].width_vision // 2 + food[k].radius)
+                    and
+                    (abs(distance_y) <= players[i].height_vision // 2 + food[k].radius)
+            ):
+
+                # Проверка сможет ли i съесть j
+                if (distance_x ** 2 + distance_y ** 2) ** 0.5 <= players[i].radius:
+                    # Изменение радиуса i игрока
+                    players[i].radius = get_new_radius(players[i].radius, food[k].radius)
+                    food[k].radius = 0
+
+                if players[i].connection is not None and food[k].radius != 0:
+                    # подготовка данных для добавления в список видимости
+                    x_ = round(distance_x)
+                    y_ = round(distance_y)
+                    r_ = round(food[k].radius)
+                    c_ = food[k].color
+
+                    visible_obj[i].append(f'{x_} {y_} {r_} {c_}')
+
+
+
+
         for j in range(i + 1, players_count):
             distance_x = players[j].x - players[i].x
             distance_y = players[j].y - players[i].y
@@ -163,7 +219,8 @@ while RUNNING:
                 if ((distance_x ** 2 + distance_y ** 2) ** 0.5 <= players[i].radius and
                         players[i].radius > 1.1 * players[j].radius
                 ):
-                    #### Изменение радиуса i игрока
+                    # Изменение радиуса i игрока
+                    players[i].radius = get_new_radius(players[i].radius, players[j].radius)
                     players[j].radius, players[j].speed_x, players[j].speed_y = 0, 0, 0
 
                 if players[i].connection is not None:
@@ -173,7 +230,7 @@ while RUNNING:
                     r_ = round(players[j].radius)
                     c_ = players[j].color
 
-                    visible_obj[i].append('{} {} {} {}'.format(x_, y_, r_, c_))
+                    visible_obj[i].append(f'{x_} {y_} {r_} {c_}')
 
             # игрок j видит игрока i
             if (
@@ -185,7 +242,8 @@ while RUNNING:
                 if ((distance_x ** 2 + distance_y ** 2) ** 0.5 <= players[j].radius and
                         players[j].radius > 1.1 * players[i].radius
                 ):
-                    #### Изменение радиуса j игрока
+                    # Изменение радиуса j игрока
+                    players[j].radius = get_new_radius(players[j].radius, players[i].radius)
                     players[i].radius, players[i].speed_x, players[i].speed_y = 0, 0, 0
 
                 if players[j].connection is not None:
@@ -195,12 +253,13 @@ while RUNNING:
                     r_ = round(players[i].radius)
                     c_ = players[i].color
 
-                    visible_obj[j].append('{} {} {} {}'.format(x_, y_, r_, c_))
+                    visible_obj[j].append(f'{x_} {y_} {r_} {c_}')
 
     # Формируем ответ каждому игроку
     responses = ['' for i in range(len(players))]
     for i in range(len(players)):
-        responses[i] = f'<{",".join(visible_obj[i])}>'
+        player_radius = [str(round(players[i].radius))]
+        responses[i] = f'<{",".join(player_radius + visible_obj[i])}>'
 
     # Отправляем новое состояние поля
     for i, player in enumerate(players):
@@ -217,6 +276,11 @@ while RUNNING:
             if player.connection is not None:
                 player.connection.close()
             players.remove(player)
+
+    # Очистка списка от съеденной еды
+    for f in food:
+        if not f.radius:
+            food.remove(f)
 
     # Рисуем комнату
     for event in pygame.event.get():  # Список событий
