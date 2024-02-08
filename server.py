@@ -5,7 +5,7 @@ import pygame
 
 RUNNING = True
 FPS = 100
-START_PLAYER_SIZE = 50
+START_PLAYER_SIZE = 300
 FOOD_SIZE = 15
 WIDTH_ROOM, HEIGHT_ROOM = 4000, 4000
 WIDTH_SERVER_WINDOW, HEIGHT_SERVER_WINDOW = 300, 300
@@ -48,7 +48,8 @@ class Player:
         self.y = y
         self.radius = radius
         self.color = color
-        self.name = '^_^'
+        self.name = rnd.choice(['^_^', r'¯\_(ツ)_/¯', r'(o-_-o)',
+                                r'(ᵔ.ᵔ)'])
 
         self.scale = 1
         self.width_window = 1000
@@ -95,7 +96,7 @@ class Player:
                 self.y += self.speed_y
 
         # Зависимость абсолютной скорости от размера игрока
-        self.absolute_speed = 30 / self.radius ** 0.5
+        self.absolute_speed = 30 / (self.radius ** 0.5 or 0.1)
 
         # Уменьшение радиуса игрока
         if self.radius > 100:
@@ -289,8 +290,12 @@ while RUNNING:
                     y_ = round(distance_y / players[i].scale)
                     r_ = round(players[j].radius / players[j].scale)
                     c_ = players[j].color
+                    n_ = players[j].name
 
-                    visible_obj[i].append(f'{x_} {y_} {r_} {c_}')
+                    if players[j].radius >= 30 * players[i].scale:
+                        visible_obj[i].append(f'{x_} {y_} {r_} {c_} {n_}')
+                    else:
+                        visible_obj[i].append(f'{x_} {y_} {r_} {c_}')
 
             # игрок j видит игрока i
             if (
@@ -312,14 +317,23 @@ while RUNNING:
                     y_ = round(-distance_y / players[j].scale)
                     r_ = round(players[i].radius / players[j].scale)
                     c_ = players[i].color
+                    n_ = players[i].name
 
-                    visible_obj[j].append(f'{x_} {y_} {r_} {c_}')
+                    if players[i].radius >= 30 * players[j].scale:
+                        visible_obj[j].append(f'{x_} {y_} {r_} {c_} {n_}')
+                    else:
+                        visible_obj[j].append(f'{x_} {y_} {r_} {c_}')
 
     # Формируем ответ каждому игроку
     responses = ['' for i in range(len(players))]
     for i in range(len(players)):
-        player_radius = [str(round(players[i].radius / players[i].scale))]
-        responses[i] = f'<{",".join(player_radius + visible_obj[i])}>'
+        player_radius = str(round(players[i].radius / players[i].scale))  # Размер игрока
+        pos_x = str(round(players[i].x / players[i].scale))               # Позиция х на карте сервера
+        pos_y = str(round(players[i].y / players[i].scale))               # Позиция х на карте сервера
+        scale = str(players[i].scale)                                     # Масштаб видимости игрока
+        message = [f'{player_radius} {pos_x} {pos_y} {scale}']
+
+        responses[i] = f'<{",".join(message + visible_obj[i])}>'
 
     # Отправляем новое состояние поля
     for i, player in enumerate(players):

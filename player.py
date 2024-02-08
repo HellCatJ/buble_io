@@ -7,11 +7,11 @@ WIDTH_WINDOW, HEIGHT_WINDOW = 700, 600
 HALF_WIDTH, HALF_HEIGHT = WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2
 SCREEN_CENTER = (WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2)
 PLAYER_RADIUS = 50
-# PLAYER_COLOR = (255, 0, 0)
 original_direction_vector = direction_vector = (0, 0)
 COLORS = {0: (255, 255, 0), 1: (255, 0, 0), 2: (0, 255, 0), 3: (0, 255, 255)}
 COLORS_SET = len(COLORS)
 NICKNAME = '|>_<|'
+GRID_COLOR = (150, 150, 150)
 
 
 def find_data(line):
@@ -24,6 +24,13 @@ def find_data(line):
     return ''
 
 
+
+def write_nick(x, y, radius, name):
+    font = pygame.font.Font(None, radius)
+    nick = font.render(name, True, (0, 0, 0))
+    rect = nick.get_rect(center=(x, y))
+    screen.blit(nick, rect)
+
 def draw_opponents(data):
     for i, obj in enumerate(data):
         new_obj = obj.split()
@@ -32,6 +39,9 @@ def draw_opponents(data):
         r = int(new_obj[2])
         color = int(new_obj[3])
         pygame.draw.circle(screen, COLORS[color], (x, y), r)
+
+        if len(new_obj) == 5:
+            write_nick(x, y, r, new_obj[4])
 
 
 class Me:
@@ -50,6 +60,49 @@ class Me:
             SCREEN_CENTER,
             self.radius
         )
+        write_nick(HALF_WIDTH, HALF_HEIGHT, self.radius, NICKNAME)
+
+
+class Grid:
+    def __init__(self, screen):
+        self.screen = screen
+        self.x = 0
+        self.y = 0
+        self.start_size = 200
+        self.size = self.start_size
+
+    def update(self, x, y, scale):
+        self.size = self.start_size // scale  # Обновление размера ячейки сетки когда меняется масштаб
+
+        # Сетка движется противоположно направлению игрока потому "-"
+        # Ограничение при помощи модуля чтобы сетка не убежала
+        self.x = -self.size + (-x % self.size)
+        self.y = -self.size + (-y % self.size)
+
+
+    def draw(self):
+        # Отрисовка вертикальных полос
+        for i in range(WIDTH_WINDOW // self.size + 2):
+            pygame.draw.line(self.screen,
+                             GRID_COLOR,
+                             (self.x + i * self.size, 0), # Координаты верхнего конца отрезка
+                             (self.x + i * self.size, HEIGHT_WINDOW), # Координаты нихденго конца отрезка
+                             1)
+
+        # Отрисовка горизонтальных полос
+        for i in range(HEIGHT_WINDOW // self.size + 2):
+            pygame.draw.line(self.screen,
+                             GRID_COLOR,
+                             (0, self.y + i * self.size),  # Координаты верхнего конца отрезка
+                             (WIDTH_WINDOW, self.y + i * self.size),  # Координаты нихденго конца отрезка
+                             1)
+
+
+# Создание окна игры
+pygame.init()
+screen = pygame.display.set_mode((WIDTH_WINDOW, HEIGHT_WINDOW))
+pygame.display.set_caption('Untitled')
+
 
 
 # Создание сокета и подключение к серверу
@@ -68,12 +121,10 @@ data = player_sock.recv(64).decode()
 player_sock.send('!'.encode())
 
 # Объекта игрока
+grid = Grid(screen)
 me = Me(data)
 
-# Создание окна игры
-pygame.init()
-screen = pygame.display.set_mode((WIDTH_WINDOW, HEIGHT_WINDOW))
-pygame.display.set_caption('Untitled')
+
 
 while RUNNING:
     # Обработка событий
@@ -100,14 +151,18 @@ while RUNNING:
     data = find_data(data.decode())
     data = data.split(',')
 
-    # Рисуем новое состояние игрового поля
-    screen.fill('gray')  # Заливка фона окна
 
+
+    # Обрабатываем сообщение с сервера
     if data != ['']:
-        me.update(int(data[0]))
+        parameters = list(map(int, data[0].split()))  # Получаем радиус, х\у на сервере, масштаб
+        me.update(parameters[0])      # Радиус
+        grid.update(*parameters[1:])  # х\у на сервере, масштаб
+        # Рисуем новое состояние игрового поля
+        screen.fill('gray')  # Заливка фона окна
+        grid.draw()
         draw_opponents(data[1:])
-
-    me.draw()
+        me.draw()
 
 
     pygame.display.update()  # Обновление дисплея
