@@ -83,6 +83,7 @@ def write_nick(x, y, radius, name):
 
 
 def draw_opponents(data):
+    # TODO Скорее всего баг здесь
     for i, obj in enumerate(data):
         new_obj = obj.split()
         x = WIDTH_WINDOW // 2 + int(new_obj[0])
