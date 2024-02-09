@@ -7,12 +7,62 @@ WIDTH_WINDOW, HEIGHT_WINDOW = 700, 600
 HALF_WIDTH, HALF_HEIGHT = WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2
 SCREEN_CENTER = (WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2)
 PLAYER_RADIUS = 50
-# PLAYER_COLOR = (255, 0, 0)
 original_direction_vector = direction_vector = (0, 0)
 COLORS = {0: (255, 255, 0), 1: (255, 0, 0), 2: (0, 255, 0), 3: (0, 255, 255)}
 COLORS_SET = len(COLORS)
 NICKNAME = '|>_<|'
-GRID_COLOR = (150, 150, 150)
+
+
+def connect_to_server():
+    sock = socket.socket(socket.AF_INET,
+                         socket.SOCK_STREAM)  # Настройка сокета AF_INET - IPv4, SOCK_STREAM - TCP protocol
+
+    sock.setsockopt(socket.IPPROTO_TCP,
+                    socket.TCP_NODELAY, 1)  # Запрет упаковки нескольких состояний в один пакет
+
+    sock.connect(('localhost', 10000))  # Подключение к серверу
+    return sock
+
+
+def read_mouse_input():
+    global direction_vector
+    if pygame.mouse.get_focused():  # Находится ли мышь в пределах игрового окна
+        pos = pygame.mouse.get_pos()  # Считывание координат мыши
+        direction_vector = pos[0] - HALF_WIDTH, pos[1] - HALF_HEIGHT  # Вычисление вектора движения
+
+        if direction_vector[0] ** 2 + direction_vector[1] ** 2 <= player.radius ** 2:
+            direction_vector = (0, 0)
+
+
+def send_direction_to_server():
+    global original_direction_vector
+    if direction_vector != original_direction_vector:
+        original_direction_vector = direction_vector
+        message_for_server = '<{},{}>'.format(*direction_vector)
+        player_sock.send(message_for_server.encode())
+
+
+def get_data_from_server():
+    try:
+        data_ = player_sock.recv(2 ** 20)  # Ожидание ответа от сервера
+        data_ = find_data(data_.decode())  # Получаем радиус, х\у на сервере, масштаб
+    except Exception as err:
+        print(err)
+        exit()
+
+    return data_.split(',')
+
+
+def data_processing(server_response: list):
+    if server_response != ['']:
+        parameters = list(map(int, server_response[0].split()))
+        player.update(parameters[0])  # Радиус
+        grid.update(*parameters[1:])  # х\у на сервере, масштаб
+        # Рисуем новое состояние игрового поля
+        screen.fill('gray')  # Заливка фона окна
+        grid.draw()
+        draw_opponents(server_response[1:])
+        player.draw()
 
 
 def find_data(line):
@@ -25,12 +75,12 @@ def find_data(line):
     return ''
 
 
-
 def write_nick(x, y, radius, name):
     font = pygame.font.Font(None, radius)
     nick = font.render(name, True, (0, 0, 0))
     rect = nick.get_rect(center=(x, y))
     screen.blit(nick, rect)
+
 
 def draw_opponents(data):
     for i, obj in enumerate(data):
@@ -45,9 +95,10 @@ def draw_opponents(data):
             write_nick(x, y, r, new_obj[4])
 
 
-class Me:
+class Player:
     def __init__(self, data: str):
         self.radius, self.color = map(int, data.split())
+        self.scale = 1
 
     def update(self, new_r):
         self.radius = new_r
@@ -65,14 +116,18 @@ class Me:
 
 
 class Grid:
-    def __init__(self, screen):
-        self.screen = screen
+    """Сетка на игровом поле"""
+
+    def __init__(self, screen_):
+        self.screen = screen_
         self.x = 0
         self.y = 0
         self.start_size = 200
         self.size = self.start_size
+        self.color = (150, 150, 150)
 
     def update(self, x, y, scale):
+        player.scale = scale
         self.size = self.start_size // scale  # Обновление размера ячейки сетки когда меняется масштаб
 
         # Сетка движется противоположно направлению игрока потому "-"
@@ -80,37 +135,32 @@ class Grid:
         self.x = -self.size + (-x % self.size)
         self.y = -self.size + (-y % self.size)
 
-
     def draw(self):
         # Отрисовка вертикальных полос
         for i in range(WIDTH_WINDOW // self.size + 2):
             pygame.draw.line(self.screen,
-                             GRID_COLOR,
-                             (self.x + i * self.size, 0), # Координаты верхнего конца отрезка
-                             (self.x + i * self.size, HEIGHT_WINDOW), # Координаты нихденго конца отрезка
+                             self.color,
+                             (self.x + i * self.size, 0),  # Координаты верхнего конца отрезка
+                             (self.x + i * self.size, HEIGHT_WINDOW),  # Координаты нижнего конца отрезка
                              1)
 
         # Отрисовка горизонтальных полос
         for i in range(HEIGHT_WINDOW // self.size + 2):
             pygame.draw.line(self.screen,
-                             GRID_COLOR,
+                             self.color,
                              (0, self.y + i * self.size),  # Координаты верхнего конца отрезка
                              (WIDTH_WINDOW, self.y + i * self.size),  # Координаты нихденго конца отрезка
                              1)
 
 
-# Создание окна игры
 pygame.init()
+
+# Создание окна игры
 screen = pygame.display.set_mode((WIDTH_WINDOW, HEIGHT_WINDOW))
 pygame.display.set_caption('Untitled')
 
-
-
 # Создание сокета и подключение к серверу
-player_sock = socket.socket(socket.AF_INET,
-                            socket.SOCK_STREAM)  # Настройка сокета AF_INET - IPv4, SOCK_STREAM - TCP protocol
-player_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Запрет упаковки нескольких состояний в один пакет
-player_sock.connect(('localhost', 10000))  # Подключение к серверу
+player_sock = connect_to_server()
 
 # Отправка серверу ник и размер окна
 player_sock.send(f'.{NICKNAME} {WIDTH_WINDOW} {HEIGHT_WINDOW}.'.encode())
@@ -121,11 +171,9 @@ data = player_sock.recv(64).decode()
 # Отправка подтверждения получения
 player_sock.send('!'.encode())
 
-# Объекта игрока
+# Создание объектов сетки и игрока
 grid = Grid(screen)
-me = Me(data)
-
-
+player = Player(data)
 
 while RUNNING:
     # Обработка событий
@@ -134,37 +182,22 @@ while RUNNING:
             RUNNING = False
 
     # Считывание мыши
-    if pygame.mouse.get_focused():  # Находится ли мышь в пределах игрового окна
-        pos = pygame.mouse.get_pos()  # Считывание координат мыши
-        direction_vector = pos[0] - HALF_WIDTH, pos[1] - HALF_HEIGHT  # Вычисление вектора движения
-
-        if direction_vector[0] ** 2 + direction_vector[1] ** 2 <= me.radius ** 2:
-            direction_vector = (0, 0)
+    read_mouse_input()
 
     # Отправка вектора движения на сервер если он поменялся
-    if direction_vector != original_direction_vector:
-        original_direction_vector = direction_vector
-        message_for_server = '<{},{}>'.format(*direction_vector)
-        player_sock.send(message_for_server.encode())
+    send_direction_to_server()
 
-    # Получаем от сервера новое состояние игрового пля
-    data = player_sock.recv(1024)  # Ожидание ответа от сервера
-    data = find_data(data.decode())
-    data = data.split(',')
-
-
+    # Получение от сервера нового состояние игрового пля
+    data = get_data_from_server()
 
     # Обрабатываем сообщение с сервера
-    if data != ['']:
-        parameters = list(map(int, data[0].split()))  # Получаем радиус, х\у на сервере, масштаб
-        me.update(parameters[0])  # Pадиус
-        grid.update(*parameters[1:])  # х\у на сервере, масштаб
-        # Рисуем новое состояние игрового поля
-        screen.fill('gray')  # Заливка фона окна
-        grid.draw()
-        draw_opponents(data[1:])
-        me.draw()
+    data_processing(data)
 
+    # TODO Кнопка перезапуска (СДЕЛАТЬ)!!!!!!
+    if not player.radius:
+        write_nick(HALF_WIDTH, HALF_HEIGHT - 50, 60, 'Попробовать снова')
+        write_nick(HALF_WIDTH - 100, HALF_HEIGHT, 30, 'ДА')
+        write_nick(HALF_WIDTH + 100, HALF_HEIGHT, 30, 'НЕТ')
 
     pygame.display.update()  # Обновление дисплея
 

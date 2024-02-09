@@ -7,30 +7,33 @@ WORK_ON_SERVER = False
 SERVER_IP = 'localhost'
 RUNNING = True
 FPS = 100
-START_PLAYER_SIZE = 50
+
+START_PLAYER_SIZE = 200
 FOOD_SIZE = 15
 WIDTH_ROOM = HEIGHT_ROOM = 4000
 WIDTH_SERVER_WINDOW = HEIGHT_SERVER_WINDOW = 300
+NPS_QUANTITY = 25
+FOOD_QUANTITY = (WIDTH_ROOM * HEIGHT_ROOM) // 80000
+
 COLORS = {0: (255, 255, 0), 1: (255, 0, 0), 2: (0, 255, 0), 3: (0, 255, 255)}
 COLORS_SET = len(COLORS)
 
-NPS_QUANTITY = 50
-FOOD_QUANTITY = (WIDTH_ROOM * HEIGHT_ROOM) // 80000
 
+def create_main_socket():
+    sock = socket.socket(socket.AF_INET,
+                         socket.SOCK_STREAM)  # Настройка сокета AF_INET - IPv4, SOCK_STREAM - TCP protocol
 
-def get_new_radius(player_radius, food_radius):
-    return (player_radius ** 2 + food_radius ** 2) ** 0.5
+    sock.setsockopt(socket.IPPROTO_TCP,
+                    socket.TCP_NODELAY, 1)  # Запрет упаковки нескольких состояний в один пакет
 
+    sock.bind((SERVER_IP, 10000))  # Установка адреса и порта для сокета
 
-def get_coord(line: str):
-    open_index = None
-    for i, elem in enumerate(line):
-        if elem == '<':
-            open_index = i
-        if elem == '>' and open_index is not None:
-            res = line[open_index + 1:i]
-            return list(map(int, res.split(',')))
-    return ''
+    # Отключение блокировки выполнение программы на время ожидания ответа
+    # т.е. (работа независимо от клиента)
+    sock.setblocking(False)
+
+    sock.listen(5)  # Режим прослушивания с макс. 5 одноврем. подключениями к буферному сокету
+    return sock
 
 
 class Food:
@@ -72,7 +75,6 @@ class Player:
         self.height_window = int(next(data))
         self.width_vision = self.width_window
         self.height_vision = self.height_window
-
 
     def update(self):
 
@@ -138,87 +140,44 @@ class Player:
             self.speed_x, self.speed_y = data
 
 
-# Создание основного (буферного) сокета
-main_socket = socket.socket(socket.AF_INET,
-                            socket.SOCK_STREAM)  # Настройка сокета AF_INET - IPv4, SOCK_STREAM - TCP protocol
-main_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Запрет упаковки нескольких состояний в один пакет
-main_socket.bind((SERVER_IP, 10000))  # Установка адреса и порта для сокета
-main_socket.setblocking(False)  # Отключение блокировки выполнение программы на время ожидания ответа
-# (работа независио от клиента)
-main_socket.listen(5)  # Режим прослушивания с макс. 5 одноврем. подключениями к буферному сокету
+def get_new_radius(player_radius, food_radius):
+    return (player_radius ** 2 + food_radius ** 2) ** 0.5
 
-pygame.init()
-if not WORK_ON_SERVER:
-    # Создание графического окна сервера
-    screen = pygame.display.set_mode((WIDTH_SERVER_WINDOW, HEIGHT_SERVER_WINDOW))
 
-clock = pygame.time.Clock()
+def get_coord(line: str):
+    open_index = None
+    for i, elem in enumerate(line):
+        if elem == '<':
+            open_index = i
+        if elem == '>' and open_index is not None:
+            res = line[open_index + 1:i]
+            return list(map(int, res.split(',')))
+    return ''
 
-# Создание стартового набора НПС
-players = [Player(None, None,
-                  x=rnd.randrange(WIDTH_ROOM),
-                  y=rnd.randrange(HEIGHT_ROOM),
-                  radius=rnd.randint(10, 100),
-                  color=rnd.randrange(COLORS_SET))
-           for _ in range(NPS_QUANTITY)]
 
-# Создание стартового набора еды
-food = [Food(x=rnd.randrange(WIDTH_ROOM),
-             y=rnd.randrange(HEIGHT_ROOM),
-             radius=FOOD_SIZE,
-             color=rnd.randrange(COLORS_SET))
-        for _ in range(FOOD_QUANTITY)]
+def check_connections():
+    try:
+        new_socket, address = main_socket.accept()  # Проверка на наличие подключений
+        new_socket.setblocking(False)
+        spawn = rnd.choice(food)  # Выбираем место спавна на месте еды
+        new_player = Player(
+            new_socket,
+            address,
+            spawn.x,
+            spawn.y,
+            START_PLAYER_SIZE,
+            color=rnd.randrange(4)
+        )
 
-tick = 0
+        food.remove(spawn)
+        players.append(new_player)
 
-while RUNNING:
-    tick += 1
-    clock.tick(FPS)  # Установка кадров
+        print('New player -> ', new_player.name)
+    except Exception as err:
+        pass
 
-    if tick == 200:
-        tick = 0
-        # Проверяем, есть ли желающие войти в игру
-        try:
-            new_socket, address = main_socket.accept()  # Проверка на наличие подключений
-            new_socket.setblocking(False)
-            spawn = rnd.choice(food)  # Выбираем место спавна на месте еды
-            new_player = Player(
-                new_socket,
-                address,
-                spawn.x,
-                spawn.y,
-                START_PLAYER_SIZE,
-                color=rnd.randrange(4)
-            )
 
-            food.remove(spawn)
-            players.append(new_player)
-
-            print('Connected ')
-        except BlockingIOError:
-            pass
-
-        # Дополняется список NPC
-        for i in range(NPS_QUANTITY - len(players)):
-            if len(players):
-                spawn = rnd.choice(food)
-                players.append(Player(None, None,
-                                      x=spawn.x,
-                                      y=spawn.y,
-                                      radius=rnd.randint(10, 100),
-                                      color=rnd.randrange(COLORS_SET)
-                                      )
-                               )
-                food.remove(spawn)
-
-    # Дополняется список еды
-    food += [Food(x=rnd.randrange(WIDTH_ROOM),
-                  y=rnd.randrange(HEIGHT_ROOM),
-                  radius=FOOD_SIZE,
-                  color=rnd.randrange(COLORS_SET))
-             for _ in range(FOOD_QUANTITY - len(food))]
-
-    # Считываем команды игроков
+def read_player_commands():
     for player in players:
         if player.connection:
             try:
@@ -236,7 +195,7 @@ while RUNNING:
                     data = get_coord(data)
                     # Обрабатываем команды
                     player.change_speed(data)
-            except (BlockingIOError, ConnectionResetError):
+            except Exception as err:
                 pass
         else:
             if tick == 100:
@@ -244,7 +203,8 @@ while RUNNING:
                 player.change_speed(data)
         player.update()
 
-    # Определяем что видит каждый игрок
+
+def check_visibility():
     players_count = len(players)
     visible_obj = [[] for i in range(players_count)]
     for i in range(players_count):
@@ -332,19 +292,24 @@ while RUNNING:
                         visible_obj[j].append(f'{x_} {y_} {r_} {c_} {n_}')
                     else:
                         visible_obj[j].append(f'{x_} {y_} {r_} {c_}')
+    return visible_obj
 
-    # Формируем ответ каждому игроку
+
+def create_response(visible_obj):
     responses = ['' for i in range(len(players))]
     for i in range(len(players)):
         player_radius = str(round(players[i].radius / players[i].scale))  # Размер игрока
-        pos_x = str(round(players[i].x / players[i].scale))               # Позиция х на карте сервера
-        pos_y = str(round(players[i].y / players[i].scale))               # Позиция х на карте сервера
-        scale = str(players[i].scale)                                     # Масштаб видимости игрока
+        pos_x = str(round(players[i].x / players[i].scale))  # Позиция х на карте сервера
+        pos_y = str(round(players[i].y / players[i].scale))  # Позиция х на карте сервера
+        scale = str(players[i].scale)  # Масштаб видимости игрока
         message = [f'{player_radius} {pos_x} {pos_y} {scale}']
 
         responses[i] = f'<{",".join(message + visible_obj[i])}>'
 
-    # Отправляем новое состояние поля
+    return responses
+
+
+def send_data_to_player(responses):
     for i, player in enumerate(players):
         if players[i].connection and player.ready:
             try:
@@ -353,7 +318,43 @@ while RUNNING:
             except:
                 player.errors += 1
 
-    # Очистка списка от игроков с ошибками
+
+def draw_server_screen():
+    screen.fill('BLACK')
+
+    for player in players:
+        x = round(player.x * WIDTH_SERVER_WINDOW / WIDTH_ROOM)
+        y = round(player.y * HEIGHT_SERVER_WINDOW / HEIGHT_ROOM)
+        radius = round(player.radius * WIDTH_SERVER_WINDOW / WIDTH_ROOM)
+        color = COLORS[player.color]
+
+        pygame.draw.circle(screen, color, (x, y), radius)
+        pygame.display.update()
+
+
+def add_npc():
+    for i in range(NPS_QUANTITY - len(players)):
+        if len(players):
+            spawn = rnd.choice(food)
+            players.append(Player(None, None,
+                                  x=spawn.x,
+                                  y=spawn.y,
+                                  radius=rnd.randint(10, 100),
+                                  color=rnd.randrange(COLORS_SET)
+                                  )
+                           )
+            food.remove(spawn)
+
+
+def add_food(food_list):
+    food_list += [Food(x=rnd.randrange(WIDTH_ROOM),
+                       y=rnd.randrange(HEIGHT_ROOM),
+                       radius=FOOD_SIZE,
+                       color=rnd.randrange(COLORS_SET))
+                  for _ in range(FOOD_QUANTITY - len(food))]
+
+
+def clean_players():
     for player in players:
         if not player.radius:
             if player.connection:
@@ -366,27 +367,81 @@ while RUNNING:
                 player.connection.close()
             players.remove(player)
 
-    # Очистка списка от съеденной еды
+
+def clean_food():
     for f in food:
         if not f.radius:
             food.remove(f)
 
+
+# Создание основного (буферного) сокета, который распределяет клиентов по обычным сокетам
+main_socket = create_main_socket()
+
+pygame.init()
+
+if not WORK_ON_SERVER:
+    # Создание графического окна сервера
+    screen = pygame.display.set_mode((WIDTH_SERVER_WINDOW, HEIGHT_SERVER_WINDOW))
+
+clock = pygame.time.Clock()
+
+# Создание стартового набора НПС
+players = [Player(None, None,
+                  x=rnd.randrange(WIDTH_ROOM),
+                  y=rnd.randrange(HEIGHT_ROOM),
+                  radius=rnd.randint(10, 100),
+                  color=rnd.randrange(COLORS_SET))
+           for _ in range(NPS_QUANTITY)]
+
+# Создание стартового набора еды
+food = [Food(x=rnd.randrange(WIDTH_ROOM),
+             y=rnd.randrange(HEIGHT_ROOM),
+             radius=FOOD_SIZE,
+             color=rnd.randrange(COLORS_SET))
+        for _ in range(FOOD_QUANTITY)]
+
+tick = 0
+
+while RUNNING:
+    tick += 1
+    clock.tick(FPS)  # Установка кадров
+
+    if tick == 200:
+        tick = 0
+        # Проверка, есть ли желающие войти в игру
+        check_connections()
+
+        # Дополнение списка NPC (если их меньше заданного количества)
+        add_npc()
+
+    # Дополнение списка
+    add_food(food)
+
+    # Считывание команд игроков
+    read_player_commands()
+
+    # Определение видимости игроков
+    visible_objects = check_visibility()
+
+    # Формирование ответа каждому игроку
+    messages = create_response(visible_objects)
+
+    # Отправка нового состояние поля
+    send_data_to_player(messages)
+
+    # Очистка списка от игроков с ошибками
+    clean_players()
+
+    # Очистка списка от съеденной еды
+    clean_food()
+
     if not WORK_ON_SERVER:
-        # Рисуем комнату
+        # Отрисовка всей комнаты
+        draw_server_screen()
+
         for event in pygame.event.get():  # Список событий
             if event.type == pygame.QUIT:
                 RUNNING = False
-
-        screen.fill('BLACK')
-
-        for player in players:
-            x = round(player.x * WIDTH_SERVER_WINDOW / WIDTH_ROOM)
-            y = round(player.y * HEIGHT_SERVER_WINDOW / HEIGHT_ROOM)
-            radius = round(player.radius * WIDTH_SERVER_WINDOW / WIDTH_ROOM)
-            color = COLORS[player.color]
-
-            pygame.draw.circle(screen, color, (x, y), radius)
-            pygame.display.update()
 
 pygame.quit()
 main_socket.close()
