@@ -3,17 +3,19 @@ import socket
 
 import pygame
 
+WORK_ON_SERVER = False
+SERVER_IP = 'localhost'
 RUNNING = True
 FPS = 100
-START_PLAYER_SIZE = 300
+START_PLAYER_SIZE = 50
 FOOD_SIZE = 15
-WIDTH_ROOM, HEIGHT_ROOM = 4000, 4000
-WIDTH_SERVER_WINDOW, HEIGHT_SERVER_WINDOW = 300, 300
-
-NPS_QUANTITY = 25
-FOOD_QUANTITY = (WIDTH_ROOM * HEIGHT_ROOM) // 80000
+WIDTH_ROOM = HEIGHT_ROOM = 4000
+WIDTH_SERVER_WINDOW = HEIGHT_SERVER_WINDOW = 300
 COLORS = {0: (255, 255, 0), 1: (255, 0, 0), 2: (0, 255, 0), 3: (0, 255, 255)}
 COLORS_SET = len(COLORS)
+
+NPS_QUANTITY = 50
+FOOD_QUANTITY = (WIDTH_ROOM * HEIGHT_ROOM) // 80000
 
 
 def get_new_radius(player_radius, food_radius):
@@ -48,8 +50,7 @@ class Player:
         self.y = y
         self.radius = radius
         self.color = color
-        self.name = rnd.choice(['^_^', r'¯\_(ツ)_/¯', r'(o-_-o)',
-                                r'(ᵔ.ᵔ)'])
+        self.name = rnd.choice(['^_^', r'¯\_(ツ)_/¯', r'(o-_-o)'])
 
         self.scale = 1
         self.width_window = 1000
@@ -58,13 +59,14 @@ class Player:
         self.height_vision = 1000
 
         self.errors = 0
-        self.ready = False  # True - отправка клиенту состояния поля
+        self.dead = 0
+        self.ready = False  # Если True - отправка клиенту состояния поля
 
         self.absolute_speed = 30 / self.radius ** 0.5
         self.speed_x = self.speed_y = 0
 
     def set_options(self, data: str):
-        data = iter(data[1:-1].split(' '))
+        data = iter(data[1:-1].split())
         self.name = next(data)
         self.width_window = int(next(data))
         self.height_window = int(next(data))
@@ -73,46 +75,50 @@ class Player:
 
 
     def update(self):
+
         # х координата
-        if self.x - self.radius <= 0:
+        if (self.x - self.radius) <= 0:
             if self.speed_x >= 0:
                 self.x += self.speed_x
         else:
-            if self.x + self.radius >= WIDTH_ROOM:
+            if (self.x + self.radius) >= WIDTH_ROOM:
                 if self.speed_x <= 0:
                     self.x += self.speed_x
             else:
                 self.x += self.speed_x
 
         # y координата
-        if self.y - self.radius <= 0:
+        if (self.y - self.radius) <= 0:
             if self.speed_y >= 0:
                 self.y += self.speed_y
         else:
-            if self.y + self.radius >= HEIGHT_ROOM:
+            if (self.y + self.radius) >= HEIGHT_ROOM:
                 if self.speed_y <= 0:
-                    self.x += self.speed_y
+                    self.y += self.speed_y
             else:
                 self.y += self.speed_y
 
         # Зависимость абсолютной скорости от размера игрока
-        self.absolute_speed = 30 / (self.radius ** 0.5 or 0.1)
+        if self.radius:
+            self.absolute_speed = 30 / self.radius ** 0.5
+        else:
+            self.absolute_speed = 0
 
         # Уменьшение радиуса игрока
-        if self.radius > 100:
-            self.radius -= self.radius / 1800
+        if self.radius > 200:
+            self.radius -= self.radius / 18000
 
         # Изменение масштаба от размера игрока
-        if (self.radius >= self.width_vision / 4 or
-                self.radius >= self.height_vision / 4):
+        if (self.radius >= (self.width_vision / 4) or
+                self.radius >= (self.height_vision / 4)):
             if (self.width_vision <= WIDTH_ROOM or
                     self.height_vision <= HEIGHT_ROOM):
                 self.scale *= 2
-                self.width_vision = self.width_vision * self.scale
-                self.height_vision = self.height_vision * self.scale
+                self.width_vision = self.width_window * self.scale
+                self.height_vision = self.height_window * self.scale
 
-        if (self.radius < self.width_vision / 8 and
-                self.radius < self.height_vision / 8):
+        if (self.radius < (self.width_vision / 8) and
+                self.radius < (self.height_vision / 8)):
             if self.scale > 1:
                 self.scale //= 2
                 self.width_vision = self.width_window * self.scale
@@ -121,11 +127,12 @@ class Player:
     def change_speed(self, data):
         """Функция нормирования вектора направления движения
         (отбросить длину вектора и оставить только его направление) """
-        if data == (0, 0):
-            self.x, self.y = data
-        else:
-            len_vector = (data[0] ** 2 + data[1] ** 2) ** 0.5 or 0.1
 
+        if data == (0, 0):
+            self.speed_x, self.speed_y = data
+        # else:
+        len_vector = (data[0] ** 2 + data[1] ** 2) ** 0.5
+        if len_vector:
             data = data[0] / len_vector, data[1] / len_vector
             data = tuple(map(lambda x: x * self.absolute_speed, data))
             self.speed_x, self.speed_y = data
@@ -135,14 +142,16 @@ class Player:
 main_socket = socket.socket(socket.AF_INET,
                             socket.SOCK_STREAM)  # Настройка сокета AF_INET - IPv4, SOCK_STREAM - TCP protocol
 main_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Запрет упаковки нескольких состояний в один пакет
-main_socket.bind(('localhost', 10000))  # Установка адреса и порта для сокета
+main_socket.bind((SERVER_IP, 10000))  # Установка адреса и порта для сокета
 main_socket.setblocking(False)  # Отключение блокировки выполнение программы на время ожидания ответа
 # (работа независио от клиента)
 main_socket.listen(5)  # Режим прослушивания с макс. 5 одноврем. подключениями к буферному сокету
 
-# Создание графического окна сервера
 pygame.init()
-screen = pygame.display.set_mode((WIDTH_SERVER_WINDOW, HEIGHT_SERVER_WINDOW))
+if not WORK_ON_SERVER:
+    # Создание графического окна сервера
+    screen = pygame.display.set_mode((WIDTH_SERVER_WINDOW, HEIGHT_SERVER_WINDOW))
+
 clock = pygame.time.Clock()
 
 # Создание стартового набора НПС
@@ -185,13 +194,13 @@ while RUNNING:
             food.remove(spawn)
             players.append(new_player)
 
-            print('Connected ', address)
+            print('Connected ')
         except BlockingIOError:
             pass
 
         # Дополняется список NPC
         for i in range(NPS_QUANTITY - len(players)):
-            if len(food):
+            if len(players):
                 spawn = rnd.choice(food)
                 players.append(Player(None, None,
                                       x=spawn.x,
@@ -211,7 +220,7 @@ while RUNNING:
 
     # Считываем команды игроков
     for player in players:
-        if player.connection is not None:
+        if player.connection:
             try:
                 data = player.connection.recv(1024).decode()  # Чтение данных с сокета
                 # Пришло сообщение о готовности к диалогу
@@ -257,7 +266,7 @@ while RUNNING:
                     players[i].radius = get_new_radius(players[i].radius, food[k].radius)
                     food[k].radius = 0
 
-                if players[i].connection is not None and food[k].radius != 0:
+                if players[i].connection and food[k].radius:
                     # подготовка данных для добавления в список видимости
                     x_ = round(distance_x / players[i].scale)
                     y_ = round(distance_y / players[i].scale)
@@ -282,9 +291,9 @@ while RUNNING:
                 ):
                     # Изменение радиуса i игрока
                     players[i].radius = get_new_radius(players[i].radius, players[j].radius)
-                    players[j].radius, players[j].speed_x, players[j].speed_y = 0, 0, 0
+                    players[j].radius = players[j].speed_x = players[j].speed_y = 0
 
-                if players[i].connection is not None:
+                if players[i].connection:
                     # подготовка данных для добавления в список видимости
                     x_ = round(distance_x / players[i].scale)
                     y_ = round(distance_y / players[i].scale)
@@ -309,9 +318,9 @@ while RUNNING:
                 ):
                     # Изменение радиуса j игрока
                     players[j].radius = get_new_radius(players[j].radius, players[i].radius)
-                    players[i].radius, players[i].speed_x, players[i].speed_y = 0, 0, 0
+                    players[i].radius = players[i].speed_x = players[i].speed_y = 0
 
-                if players[j].connection is not None:
+                if players[j].connection:
                     # подготовка данных для добавления в список видимости
                     x_ = round(-distance_x / players[j].scale)
                     y_ = round(-distance_y / players[j].scale)
@@ -337,7 +346,7 @@ while RUNNING:
 
     # Отправляем новое состояние поля
     for i, player in enumerate(players):
-        if players[i].connection is not None and player.ready:
+        if players[i].connection and player.ready:
             try:
                 player.connection.send(responses[i].encode())  # Отправляем данные
                 player.errors = 0
@@ -346,8 +355,14 @@ while RUNNING:
 
     # Очистка списка от игроков с ошибками
     for player in players:
-        if player.errors == 500 or player.radius == 0:
-            if player.connection is not None:
+        if not player.radius:
+            if player.connection:
+                player.dead += 1
+            else:
+                player.dead += 2000
+
+        if player.errors == 500 or player.dead == 2000:
+            if player.connection:
                 player.connection.close()
             players.remove(player)
 
@@ -356,21 +371,22 @@ while RUNNING:
         if not f.radius:
             food.remove(f)
 
-    # Рисуем комнату
-    for event in pygame.event.get():  # Список событий
-        if event.type == pygame.QUIT:
-            RUNNING = False
+    if not WORK_ON_SERVER:
+        # Рисуем комнату
+        for event in pygame.event.get():  # Список событий
+            if event.type == pygame.QUIT:
+                RUNNING = False
 
-    screen.fill('BLACK')
+        screen.fill('BLACK')
 
-    for player in players:
-        x = round(player.x * WIDTH_SERVER_WINDOW / WIDTH_ROOM)
-        y = round(player.y * HEIGHT_SERVER_WINDOW / HEIGHT_ROOM)
-        radius = round(player.radius * WIDTH_SERVER_WINDOW / WIDTH_ROOM)
-        color = COLORS[player.color]
+        for player in players:
+            x = round(player.x * WIDTH_SERVER_WINDOW / WIDTH_ROOM)
+            y = round(player.y * HEIGHT_SERVER_WINDOW / HEIGHT_ROOM)
+            radius = round(player.radius * WIDTH_SERVER_WINDOW / WIDTH_ROOM)
+            color = COLORS[player.color]
 
-        pygame.draw.circle(screen, color, (x, y), radius)
-        pygame.display.update()
+            pygame.draw.circle(screen, color, (x, y), radius)
+            pygame.display.update()
 
 pygame.quit()
 main_socket.close()
