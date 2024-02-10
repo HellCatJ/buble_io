@@ -8,11 +8,11 @@ SERVER_IP = 'localhost'
 RUNNING = True
 FPS = 100
 
-START_PLAYER_SIZE = 200
+START_PLAYER_SIZE = 50
 FOOD_SIZE = 15
 WIDTH_ROOM = HEIGHT_ROOM = 4000
 WIDTH_SERVER_WINDOW = HEIGHT_SERVER_WINDOW = 300
-NPS_QUANTITY = 25
+NPS_QUANTITY = 50
 FOOD_QUANTITY = (WIDTH_ROOM * HEIGHT_ROOM) // 80000
 
 COLORS = {0: (255, 255, 0), 1: (255, 0, 0), 2: (0, 255, 0), 3: (0, 255, 255)}
@@ -59,7 +59,7 @@ class Player:
         self.width_window = 1000
         self.height_window = 800
         self.width_vision = 1000
-        self.height_vision = 1000
+        self.height_vision = 800
 
         self.errors = 0
         self.dead = 0
@@ -108,19 +108,19 @@ class Player:
 
         # Уменьшение радиуса игрока
         if self.radius > 200:
-            self.radius -= self.radius / 18000
+            self.radius -= self.radius / 1800
 
         # Изменение масштаба от размера игрока
-        if (self.radius >= (self.width_vision / 4) or
-                self.radius >= (self.height_vision / 4)):
-            if (self.width_vision <= WIDTH_ROOM or
-                    self.height_vision <= HEIGHT_ROOM):
+        if ((self.radius >= self.width_vision / 4) or
+                (self.radius >= self.height_vision / 4)):
+            if ((self.width_vision <= WIDTH_ROOM) or
+                    (self.height_vision <= HEIGHT_ROOM)):
                 self.scale *= 2
                 self.width_vision = self.width_window * self.scale
                 self.height_vision = self.height_window * self.scale
 
-        if (self.radius < (self.width_vision / 8) and
-                self.radius < (self.height_vision / 8)):
+        if ((self.radius < self.width_vision / 8) and
+                (self.radius < self.height_vision / 8)):
             if self.scale > 1:
                 self.scale //= 2
                 self.width_vision = self.width_window * self.scale
@@ -257,7 +257,7 @@ def check_visibility():
                     # подготовка данных для добавления в список видимости
                     x_ = round(distance_x / players[i].scale)
                     y_ = round(distance_y / players[i].scale)
-                    r_ = round(players[j].radius / players[j].scale)
+                    r_ = round(players[j].radius / players[i].scale)
                     c_ = players[j].color
                     n_ = players[j].name
 
