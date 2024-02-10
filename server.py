@@ -170,7 +170,6 @@ def check_connections():
         food.remove(spawn)
         players.append(new_player)
 
-        print('New player -> ', new_player.name)
     except Exception as err:
         pass
 

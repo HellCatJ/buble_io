@@ -1,6 +1,9 @@
 import socket
+import sys
 
 import pygame
+
+from packages.button import ImageButton
 
 WIDTH_WINDOW, HEIGHT_WINDOW = 700, 600
 HALF_WIDTH, HALF_HEIGHT = WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2
@@ -46,7 +49,7 @@ def get_data_from_server(player_sock):
         data_ = find_data(data_.decode())  # Получаем радиус, х\у на сервере, масштаб
     except Exception as err:
         print(err)
-        exit()
+        sys.exit()
 
     return data_.split(',')
 
@@ -58,6 +61,7 @@ def data_processing(player, grid, server_response: list):
         grid.update(*parameters[1:])  # х\у на сервере, масштаб
         # Рисуем новое состояние игрового поля
         screen.fill('gray')  # Заливка фона окна
+
         grid.draw()
         draw_opponents(server_response[1:])
         player.draw()
@@ -92,6 +96,14 @@ def draw_opponents(data):
         if len(new_obj) == 5:
             write_nick(x, y, r, new_obj[4])
 
+
+def draw_lose_screen(buttons):
+    pygame.draw.rect(surface, (255, 255, 255, 120), (0, 0, WIDTH_WINDOW, HEIGHT_WINDOW))
+    write_nick(HALF_WIDTH, HALF_HEIGHT - 50, 60, 'Попробовать снова')
+
+    for button in buttons:
+        button.check_hover(pygame.mouse.get_pos())
+        button.draw(screen)
 
 class Player:
     def __init__(self, data: str):
@@ -156,10 +168,18 @@ pygame.init()
 screen = pygame.display.set_mode((WIDTH_WINDOW, HEIGHT_WINDOW))
 pygame.display.set_caption('Untitled')
 
+# Создание поверхности, которая будет над основным экраном
+surface = pygame.Surface((WIDTH_WINDOW, HEIGHT_WINDOW), pygame.SRCALPHA)
+
+
 
 def main():
     # Создание сокета и подключение к серверу
-    player_sock = connect_to_server()
+    try:
+        player_sock = connect_to_server()
+    except ConnectionRefusedError:
+        print('Server not found')
+        sys.exit()
 
     # Отправка серверу ник и размер окна
     player_sock.send(f'.{NICKNAME} {WIDTH_WINDOW} {HEIGHT_WINDOW}.'.encode())
@@ -173,13 +193,18 @@ def main():
     # Создание объектов сетки и игрока
     grid = Grid(screen)
     player = Player(data)
+    retry_button = ImageButton(HALF_WIDTH - 150, HALF_HEIGHT, 150, 50, 'ДА',
+                               r'packages\img\simple_img1.jpg',
+                               r'packages\img\simple_img2.jpg',
+                               r'packages\sound\mouse_click.wav')
+
+    reject_button = ImageButton(HALF_WIDTH + 5, HALF_HEIGHT, 150, 50, 'НЕТ',
+                                r'packages\img\simple_img1.jpg',
+                                r'packages\img\simple_img2.jpg')
+    buttons = (retry_button, reject_button)
     is_running = True
 
     while is_running:
-        # Обработка событий
-        for event in pygame.event.get():  # Список событий
-            if event.type == pygame.QUIT:
-                is_running = False
 
         # Считывание мыши
         read_mouse_input(player)
@@ -193,13 +218,26 @@ def main():
         # Обрабатываем сообщение с сервера
         data_processing(player, grid, data)
 
-        # TODO Кнопка перезапуска (СДЕЛАТЬ)!!!!!!
-        if not player.radius:
-            write_nick(HALF_WIDTH, HALF_HEIGHT - 50, 60, 'Попробовать снова')
-            write_nick(HALF_WIDTH - 100, HALF_HEIGHT, 30, 'ДА')
-            write_nick(HALF_WIDTH + 100, HALF_HEIGHT, 30, 'НЕТ')
+        # Обработка событий
+        for event in pygame.event.get():  # Список событий
+            if event.type == pygame.QUIT:
+                is_running = False
+            elif (event.type == pygame.USEREVENT and
+                  event.button == retry_button):
+                main()
+            elif (event.type == pygame.USEREVENT and
+                  event.button == reject_button):
+                sys.exit()
 
-        pygame.display.update()  # Обновление дисплея
+            for button in buttons:
+                button.handle_event(event)
+
+        if not player.radius:
+            screen.blit(surface, (0, 0))  # Покрываем основной экран поверхностью
+            draw_lose_screen(buttons)
+
+
+        pygame.display.flip()  # Обновление дисплея
 
     pygame.quit()
 
