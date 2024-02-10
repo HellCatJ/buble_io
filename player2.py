@@ -1,16 +1,25 @@
+
 import socket
+import sys
 
 import pygame
+import itertools as it
 
-RUNNING = True
+from packages.button import ImageButton
+
+
+
 WIDTH_WINDOW, HEIGHT_WINDOW = 700, 600
 HALF_WIDTH, HALF_HEIGHT = WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2
 SCREEN_CENTER = (WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2)
-PLAYER_RADIUS = 50
 original_direction_vector = direction_vector = (0, 0)
 COLORS = {0: (255, 255, 0), 1: (255, 0, 0), 2: (0, 255, 0), 3: (0, 255, 255)}
 COLORS_SET = len(COLORS)
-NICKNAME = '|>_<|'
+NICKNAME = 'Капитан_Джек_Поскорей' #'|>_<|'
+SOUND = it.cycle((fr'packages\sound\{s}.mp3'
+                  for s in ('main_theme', 'game1', 'game2', 'game3')))
+
+
 
 
 def connect_to_server():
@@ -24,7 +33,7 @@ def connect_to_server():
     return sock
 
 
-def read_mouse_input():
+def read_mouse_input(player):
     global direction_vector
     if pygame.mouse.get_focused():  # Находится ли мышь в пределах игрового окна
         pos = pygame.mouse.get_pos()  # Считывание координат мыши
@@ -34,7 +43,7 @@ def read_mouse_input():
             direction_vector = (0, 0)
 
 
-def send_direction_to_server():
+def send_direction_to_server(player_sock):
     global original_direction_vector
     if direction_vector != original_direction_vector:
         original_direction_vector = direction_vector
@@ -42,27 +51,34 @@ def send_direction_to_server():
         player_sock.send(message_for_server.encode())
 
 
-def get_data_from_server():
+def get_data_from_server(player_sock):
     try:
         data_ = player_sock.recv(2 ** 20)  # Ожидание ответа от сервера
         data_ = find_data(data_.decode())  # Получаем радиус, х\у на сервере, масштаб
     except Exception as err:
         print(err)
-        exit()
+        sys.exit()
 
     return data_.split(',')
 
 
-def data_processing(server_response: list):
+def data_processing(player, grid, server_response: list):
     if server_response != ['']:
         parameters = list(map(int, server_response[0].split()))
         player.update(parameters[0])  # Радиус
         grid.update(*parameters[1:])  # х\у на сервере, масштаб
+
         # Рисуем новое состояние игрового поля
         screen.fill('gray')  # Заливка фона окна
+
         grid.draw()
         draw_opponents(server_response[1:])
+
+        # Рисуем поверхность лидерборда
+        # screen.blit(surface, (0, 0))
+        # pygame.draw.rect(surface, (0, 0, 0, 150), (WIDTH_WINDOW - 150, 0, 150, 200))
         player.draw()
+
 
 
 def find_data(line):
@@ -76,6 +92,7 @@ def find_data(line):
 
 
 def write_nick(x, y, radius, name):
+    # TODO исправить отображение ников
     font = pygame.font.Font(None, radius)
     nick = font.render(name, True, (0, 0, 0))
     rect = nick.get_rect(center=(x, y))
@@ -93,6 +110,22 @@ def draw_opponents(data):
 
         if len(new_obj) == 5:
             write_nick(x, y, r, new_obj[4])
+
+
+def draw_lose_screen(buttons):
+    pygame.draw.rect(surface, (255, 255, 255, 120), (0, 0, WIDTH_WINDOW, HEIGHT_WINDOW))
+    write_nick(HALF_WIDTH, HALF_HEIGHT - 50, 60, 'Попробовать снова')
+
+    for button in buttons:
+        button.check_hover(pygame.mouse.get_pos())
+        button.draw(screen)
+
+
+# def play_game_over_sound():
+#     game_over = pygame.mixer.Sound(r'packages\sound\game_over.mp3')
+#     game_over.set_volume(0.01)  # 1 макс громкость
+#     game_over.play(-1)   # Сыграть один раз (-1 для беспрерывной игры)
+
 
 
 class Player:
@@ -127,7 +160,6 @@ class Grid:
         self.color = (150, 150, 150)
 
     def update(self, x, y, scale):
-        player.scale = scale
         self.size = self.start_size // scale  # Обновление размера ячейки сетки когда меняется масштаб
 
         # Сетка движется противоположно направлению игрока потому "-"
@@ -159,46 +191,92 @@ pygame.init()
 screen = pygame.display.set_mode((WIDTH_WINDOW, HEIGHT_WINDOW))
 pygame.display.set_caption('Untitled')
 
-# Создание сокета и подключение к серверу
-player_sock = connect_to_server()
+# Создание поверхности, которая будет над основным экраном
+surface = pygame.Surface((WIDTH_WINDOW, HEIGHT_WINDOW), pygame.SRCALPHA)
 
-# Отправка серверу ник и размер окна
-player_sock.send(f'.{NICKNAME} {WIDTH_WINDOW} {HEIGHT_WINDOW}.'.encode())
 
-# Получение размера и цвета
-data = player_sock.recv(64).decode()
 
-# Отправка подтверждения получения
-player_sock.send('!'.encode())
+def main():
+    # Создание сокета и подключение к серверу
+    try:
+        player_sock = connect_to_server()
+    except ConnectionRefusedError:
+        print('Server not found')
+        sys.exit()
 
-# Создание объектов сетки и игрока
-grid = Grid(screen)
-player = Player(data)
+    # Отправка серверу ник и размер окна
+    player_sock.send(f'.{NICKNAME} {WIDTH_WINDOW} {HEIGHT_WINDOW}.'.encode())
 
-while RUNNING:
-    # Обработка событий
-    for event in pygame.event.get():  # Список событий
-        if event.type == pygame.QUIT:
-            RUNNING = False
+    # Получение размера и цвета
+    data = player_sock.recv(64).decode()
 
-    # Считывание мыши
-    read_mouse_input()
+    # Отправка подтверждения получения
+    player_sock.send('!'.encode())
 
-    # Отправка вектора движения на сервер если он поменялся
-    send_direction_to_server()
+    # Создание объектов сетки и игрока
+    grid = Grid(screen)
+    player = Player(data)
 
-    # Получение от сервера нового состояние игрового пля
-    data = get_data_from_server()
+    # Создание объектов кнопок
+    retry_button = ImageButton(HALF_WIDTH - 150, HALF_HEIGHT, 150, 50, 'ДА',
+                               r'packages\img\simple_img1.jpg',
+                               r'packages\img\simple_img2.jpg',
+                               r'packages\sound\mouse_click.mp3')
+    reject_button = ImageButton(HALF_WIDTH + 5, HALF_HEIGHT, 150, 50, 'НЕТ',
+                                r'packages\img\simple_img1.jpg',
+                                r'packages\img\simple_img2.jpg')
+    buttons = (retry_button, reject_button)
 
-    # Обрабатываем сообщение с сервера
-    data_processing(data)
+    # pygame.mixer.music.load(next(SOUND))
+    # pygame.mixer.music.set_volume(1)
+    main_sound = pygame.mixer.Sound(next(SOUND))
+    main_sound.set_volume(0.1)
+    is_running = True
 
-    # TODO Кнопка перезапуска (СДЕЛАТЬ)!!!!!!
-    if not player.radius:
-        write_nick(HALF_WIDTH, HALF_HEIGHT - 50, 60, 'Попробовать снова')
-        write_nick(HALF_WIDTH - 100, HALF_HEIGHT, 30, 'ДА')
-        write_nick(HALF_WIDTH + 100, HALF_HEIGHT, 30, 'НЕТ')
+    while is_running:
+        # Проигрывание музыки игры
+        main_sound.play(-1)
 
-    pygame.display.update()  # Обновление дисплея
+        # Считывание мыши
+        read_mouse_input(player)
 
-pygame.quit()
+        # Отправка вектора движения на сервер если он поменялся
+        send_direction_to_server(player_sock)
+
+        # Получение от сервера нового состояние игрового пля
+        data = get_data_from_server(player_sock)
+
+        # Обрабатываем сообщение с сервера
+        data_processing(player, grid, data)
+
+        if not player.radius:
+            main_sound.stop()
+
+            screen.blit(surface, (0, 0))  # Покрываем основной экран поверхностью
+            draw_lose_screen(buttons)
+
+
+
+        # Обработка событий
+        for event in pygame.event.get():  # Список событий
+            if event.type == pygame.QUIT:
+                # is_running = False
+                sys.exit()
+            elif (event.type == pygame.USEREVENT and
+                  event.button == retry_button):
+                main()
+            elif (event.type == pygame.USEREVENT and
+                  event.button == reject_button):
+                sys.exit()
+
+            for button in buttons:
+                button.handle_event(event)
+
+
+        pygame.display.flip()  # Обновление дисплея
+
+    pygame.quit()
+
+
+if __name__ == '__main__':
+    main()

@@ -20,19 +20,21 @@ COLORS_SET = len(COLORS)
 
 
 def create_main_socket():
-    sock = socket.socket(socket.AF_INET,
-                         socket.SOCK_STREAM)  # Настройка сокета AF_INET - IPv4, SOCK_STREAM - TCP protocol
+    # Настройка сокета AF_INET - IPv4, SOCK_STREAM - TCP protocol
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-    sock.setsockopt(socket.IPPROTO_TCP,
-                    socket.TCP_NODELAY, 1)  # Запрет упаковки нескольких состояний в один пакет
+    # Запрет упаковки нескольких состояний в один пакет
+    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
-    sock.bind((SERVER_IP, 10000))  # Установка адреса и порта для сокета
+    # Установка адреса и порта для сокета
+    sock.bind((SERVER_IP, 10000))
 
     # Отключение блокировки выполнение программы на время ожидания ответа
     # т.е. (работа независимо от клиента)
     sock.setblocking(False)
 
-    sock.listen(5)  # Режим прослушивания с макс. 5 одноврем. подключениями к буферному сокету
+    # Режим прослушивания с макс. 5 одноврем. подключениями к буферному сокету
+    sock.listen(5)
     return sock
 
 
@@ -45,6 +47,12 @@ class Food:
 
 
 class Player:
+    __nicknames = (
+        'не_вика', 'HAHAHA', 'køtik_c' 'нøжikøм', 'TyAJIeT', 'Жрёшь?', 'Ironfire',
+        'Kezan', 'GawelleN', 'Miromice', 'Jay', 'Juce', 'Kitaxe', 'Modar',
+        'Bliss', 'Topmen',  'Dark' 'Devil', 'Envias', 'Kit', 'krot', 'SkyHorz', 'Ese', 'Kison',
+        'Never' 'mind', 'your' 'problem', 'Dr.What', 'Gavirus', 'GAZANIK', 'Khiceog')
+
     def __init__(self, conn, addr, x, y, radius, color):
         self.connection = conn
         self.address = addr
@@ -53,7 +61,7 @@ class Player:
         self.y = y
         self.radius = radius
         self.color = color
-        self.name = rnd.choice(['^_^', r'¯\_(ツ)_/¯', r'(o-_-o)'])
+        self.name = rnd.choice(self.__nicknames)
 
         self.scale = 1
         self.width_window = 1000
@@ -355,7 +363,7 @@ def clean_players():
     for player in players:
         if not player.radius:
             if player.connection:
-                player.dead += 1
+                player.dead += 0.5
             else:
                 player.dead += 2000
 

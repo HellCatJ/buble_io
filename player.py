@@ -1,9 +1,13 @@
+
 import socket
 import sys
 
 import pygame
+import itertools as it
 
 from packages.button import ImageButton
+
+
 
 WIDTH_WINDOW, HEIGHT_WINDOW = 700, 600
 HALF_WIDTH, HALF_HEIGHT = WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2
@@ -12,24 +16,35 @@ original_direction_vector = direction_vector = (0, 0)
 COLORS = {0: (255, 255, 0), 1: (255, 0, 0), 2: (0, 255, 0), 3: (0, 255, 255)}
 COLORS_SET = len(COLORS)
 NICKNAME = '|>_<|'
+SOUND = it.cycle((fr'packages\sound\{s}.mp3'
+                  for s in ('main_theme', 'game1', 'game2', 'game3')))
+
+
 
 
 def connect_to_server():
-    sock = socket.socket(socket.AF_INET,
-                         socket.SOCK_STREAM)  # Настройка сокета AF_INET - IPv4, SOCK_STREAM - TCP protocol
+    # Настройка сокета AF_INET - IPv4, SOCK_STREAM - TCP protocol
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-    sock.setsockopt(socket.IPPROTO_TCP,
-                    socket.TCP_NODELAY, 1)  # Запрет упаковки нескольких состояний в один пакет
+    # Запрет упаковки нескольких состояний в один пакет
+    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
-    sock.connect(('localhost', 10000))  # Подключение к серверу
+    # Подключение к серверу
+    sock.connect(('localhost', 10000))
     return sock
 
 
 def read_mouse_input(player):
     global direction_vector
-    if pygame.mouse.get_focused():  # Находится ли мышь в пределах игрового окна
-        pos = pygame.mouse.get_pos()  # Считывание координат мыши
-        direction_vector = pos[0] - HALF_WIDTH, pos[1] - HALF_HEIGHT  # Вычисление вектора движения
+
+    # Если мышь находится в пределах игрового окна
+    if pygame.mouse.get_focused():
+
+        # Считывание координат мыши
+        pos = pygame.mouse.get_pos()
+
+        # Вычисление вектора движения
+        direction_vector = pos[0] - HALF_WIDTH, pos[1] - HALF_HEIGHT
 
         if direction_vector[0] ** 2 + direction_vector[1] ** 2 <= player.radius ** 2:
             direction_vector = (0, 0)
@@ -45,8 +60,11 @@ def send_direction_to_server(player_sock):
 
 def get_data_from_server(player_sock):
     try:
-        data_ = player_sock.recv(2 ** 20)  # Ожидание ответа от сервера
-        data_ = find_data(data_.decode())  # Получаем радиус, х\у на сервере, масштаб
+        # Ожидание ответа от сервера
+        data_ = player_sock.recv(2 ** 20)
+
+        # Получаем радиус, х\у на сервере, масштаб
+        data_ = find_data(data_.decode())
     except Exception as err:
         print(err)
         sys.exit()
@@ -59,12 +77,16 @@ def data_processing(player, grid, server_response: list):
         parameters = list(map(int, server_response[0].split()))
         player.update(parameters[0])  # Радиус
         grid.update(*parameters[1:])  # х\у на сервере, масштаб
+
         # Рисуем новое состояние игрового поля
         screen.fill('gray')  # Заливка фона окна
 
         grid.draw()
         draw_opponents(server_response[1:])
+
+
         player.draw()
+
 
 
 def find_data(line):
@@ -78,6 +100,7 @@ def find_data(line):
 
 
 def write_nick(x, y, radius, name):
+    # TODO исправить отображение ников
     font = pygame.font.Font(None, radius)
     nick = font.render(name, True, (0, 0, 0))
     rect = nick.get_rect(center=(x, y))
@@ -104,6 +127,9 @@ def draw_lose_screen(buttons):
     for button in buttons:
         button.check_hover(pygame.mouse.get_pos())
         button.draw(screen)
+
+
+
 
 class Player:
     def __init__(self, data: str):
@@ -193,18 +219,25 @@ def main():
     # Создание объектов сетки и игрока
     grid = Grid(screen)
     player = Player(data)
+
+    # Создание объектов кнопок
     retry_button = ImageButton(HALF_WIDTH - 150, HALF_HEIGHT, 150, 50, 'ДА',
                                r'packages\img\simple_img1.jpg',
                                r'packages\img\simple_img2.jpg',
-                               r'packages\sound\mouse_click.wav')
-
+                               r'packages\sound\mouse_click.mp3')
     reject_button = ImageButton(HALF_WIDTH + 5, HALF_HEIGHT, 150, 50, 'НЕТ',
                                 r'packages\img\simple_img1.jpg',
                                 r'packages\img\simple_img2.jpg')
     buttons = (retry_button, reject_button)
+
+
+    main_sound = pygame.mixer.Sound(next(SOUND))
+    main_sound.set_volume(0.1)
     is_running = True
 
     while is_running:
+        # Проигрывание музыки игры
+        main_sound.play(-1)
 
         # Считывание мыши
         read_mouse_input(player)
@@ -218,10 +251,19 @@ def main():
         # Обрабатываем сообщение с сервера
         data_processing(player, grid, data)
 
+        if not player.radius:
+            main_sound.stop()
+
+            screen.blit(surface, (0, 0))  # Покрываем основной экран поверхностью
+            draw_lose_screen(buttons)
+
+
+
         # Обработка событий
         for event in pygame.event.get():  # Список событий
             if event.type == pygame.QUIT:
-                is_running = False
+                # is_running = False
+                sys.exit()
             elif (event.type == pygame.USEREVENT and
                   event.button == retry_button):
                 main()
@@ -231,10 +273,6 @@ def main():
 
             for button in buttons:
                 button.handle_event(event)
-
-        if not player.radius:
-            screen.blit(surface, (0, 0))  # Покрываем основной экран поверхностью
-            draw_lose_screen(buttons)
 
 
         pygame.display.flip()  # Обновление дисплея
