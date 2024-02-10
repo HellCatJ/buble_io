@@ -2,11 +2,9 @@ import socket
 
 import pygame
 
-RUNNING = True
 WIDTH_WINDOW, HEIGHT_WINDOW = 700, 600
 HALF_WIDTH, HALF_HEIGHT = WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2
 SCREEN_CENTER = (WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2)
-PLAYER_RADIUS = 50
 original_direction_vector = direction_vector = (0, 0)
 COLORS = {0: (255, 255, 0), 1: (255, 0, 0), 2: (0, 255, 0), 3: (0, 255, 255)}
 COLORS_SET = len(COLORS)
@@ -24,7 +22,7 @@ def connect_to_server():
     return sock
 
 
-def read_mouse_input():
+def read_mouse_input(player):
     global direction_vector
     if pygame.mouse.get_focused():  # Находится ли мышь в пределах игрового окна
         pos = pygame.mouse.get_pos()  # Считывание координат мыши
@@ -34,7 +32,7 @@ def read_mouse_input():
             direction_vector = (0, 0)
 
 
-def send_direction_to_server():
+def send_direction_to_server(player_sock):
     global original_direction_vector
     if direction_vector != original_direction_vector:
         original_direction_vector = direction_vector
@@ -42,7 +40,7 @@ def send_direction_to_server():
         player_sock.send(message_for_server.encode())
 
 
-def get_data_from_server():
+def get_data_from_server(player_sock):
     try:
         data_ = player_sock.recv(2 ** 20)  # Ожидание ответа от сервера
         data_ = find_data(data_.decode())  # Получаем радиус, х\у на сервере, масштаб
@@ -53,7 +51,7 @@ def get_data_from_server():
     return data_.split(',')
 
 
-def data_processing(server_response: list):
+def data_processing(player, grid, server_response: list):
     if server_response != ['']:
         parameters = list(map(int, server_response[0].split()))
         player.update(parameters[0])  # Радиус
@@ -127,7 +125,6 @@ class Grid:
         self.color = (150, 150, 150)
 
     def update(self, x, y, scale):
-        player.scale = scale
         self.size = self.start_size // scale  # Обновление размера ячейки сетки когда меняется масштаб
 
         # Сетка движется противоположно направлению игрока потому "-"
@@ -159,46 +156,53 @@ pygame.init()
 screen = pygame.display.set_mode((WIDTH_WINDOW, HEIGHT_WINDOW))
 pygame.display.set_caption('Untitled')
 
-# Создание сокета и подключение к серверу
-player_sock = connect_to_server()
+def main():
 
-# Отправка серверу ник и размер окна
-player_sock.send(f'.{NICKNAME} {WIDTH_WINDOW} {HEIGHT_WINDOW}.'.encode())
+    # Создание сокета и подключение к серверу
+    player_sock = connect_to_server()
 
-# Получение размера и цвета
-data = player_sock.recv(64).decode()
+    # Отправка серверу ник и размер окна
+    player_sock.send(f'.{NICKNAME} {WIDTH_WINDOW} {HEIGHT_WINDOW}.'.encode())
 
-# Отправка подтверждения получения
-player_sock.send('!'.encode())
+    # Получение размера и цвета
+    data = player_sock.recv(64).decode()
 
-# Создание объектов сетки и игрока
-grid = Grid(screen)
-player = Player(data)
+    # Отправка подтверждения получения
+    player_sock.send('!'.encode())
 
-while RUNNING:
-    # Обработка событий
-    for event in pygame.event.get():  # Список событий
-        if event.type == pygame.QUIT:
-            RUNNING = False
+    # Создание объектов сетки и игрока
+    grid = Grid(screen)
+    player = Player(data)
+    is_running = True
 
-    # Считывание мыши
-    read_mouse_input()
+    while is_running:
+        # Обработка событий
+        for event in pygame.event.get():  # Список событий
+            if event.type == pygame.QUIT:
+                is_running = False
 
-    # Отправка вектора движения на сервер если он поменялся
-    send_direction_to_server()
+        # Считывание мыши
+        read_mouse_input(player)
 
-    # Получение от сервера нового состояние игрового пля
-    data = get_data_from_server()
+        # Отправка вектора движения на сервер если он поменялся
+        send_direction_to_server(player_sock)
 
-    # Обрабатываем сообщение с сервера
-    data_processing(data)
+        # Получение от сервера нового состояние игрового пля
+        data = get_data_from_server(player_sock)
 
-    # TODO Кнопка перезапуска (СДЕЛАТЬ)!!!!!!
-    if not player.radius:
-        write_nick(HALF_WIDTH, HALF_HEIGHT - 50, 60, 'Попробовать снова')
-        write_nick(HALF_WIDTH - 100, HALF_HEIGHT, 30, 'ДА')
-        write_nick(HALF_WIDTH + 100, HALF_HEIGHT, 30, 'НЕТ')
+        # Обрабатываем сообщение с сервера
+        data_processing(player, grid, data)
 
-    pygame.display.update()  # Обновление дисплея
+        # TODO Кнопка перезапуска (СДЕЛАТЬ)!!!!!!
+        if not player.radius:
+            write_nick(HALF_WIDTH, HALF_HEIGHT - 50, 60, 'Попробовать снова')
+            write_nick(HALF_WIDTH - 100, HALF_HEIGHT, 30, 'ДА')
+            write_nick(HALF_WIDTH + 100, HALF_HEIGHT, 30, 'НЕТ')
 
-pygame.quit()
+        pygame.display.update()  # Обновление дисплея
+
+    pygame.quit()
+
+
+if __name__ == '__main__':
+    main()
