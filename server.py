@@ -77,7 +77,6 @@ class Player:
         self.height_vision = self.height_window
 
     def update(self):
-
         # х координата
         if (self.x - self.radius) <= 0:
             if self.speed_x >= 0:
@@ -132,7 +131,6 @@ class Player:
 
         if data == (0, 0):
             self.speed_x, self.speed_y = data
-        # else:
         len_vector = (data[0] ** 2 + data[1] ** 2) ** 0.5
         if len_vector:
             data = data[0] / len_vector, data[1] / len_vector
@@ -362,6 +360,7 @@ def clean_players():
             else:
                 player.dead += 2000
 
+        # 2000 время которое игрок будет видеть экран после смерти
         if player.errors == 500 or player.dead == 2000:
             if player.connection:
                 player.connection.close()

@@ -156,8 +156,8 @@ pygame.init()
 screen = pygame.display.set_mode((WIDTH_WINDOW, HEIGHT_WINDOW))
 pygame.display.set_caption('Untitled')
 
-def main():
 
+def main():
     # Создание сокета и подключение к серверу
     player_sock = connect_to_server()
 
