@@ -6,7 +6,6 @@ RUNNING = True
 WIDTH_WINDOW, HEIGHT_WINDOW = 700, 600
 HALF_WIDTH, HALF_HEIGHT = WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2
 SCREEN_CENTER = (WIDTH_WINDOW // 2, HEIGHT_WINDOW // 2)
-PLAYER_RADIUS = 50
 original_direction_vector = direction_vector = (0, 0)
 COLORS = {0: (255, 255, 0), 1: (255, 0, 0), 2: (0, 255, 0), 3: (0, 255, 255)}
 COLORS_SET = len(COLORS)
@@ -83,7 +82,6 @@ def write_nick(x, y, radius, name):
 
 
 def draw_opponents(data):
-    # TODO Скорее всего баг здесь
     for i, obj in enumerate(data):
         new_obj = obj.split()
         x = WIDTH_WINDOW // 2 + int(new_obj[0])
